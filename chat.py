@@ -286,14 +286,14 @@ PROVIDERS = {
     },
     "🌟 Google Gemini": {
         "id": "gemini",
-        "models": ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
-        "default": "gemini-2.0-flash",
+        "models": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+        "default": "gemini-1.5-flash",
         "key_env": "GEMINI_API_KEY",
         "url": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         "openai_compat": False,
         "color": "#f7c948",
         "icon": "🌟",
-        "desc": "Google Gemini 2.0 Flash + Pro",
+        "desc": "Gemini 1.5 Flash (free) · Pro · 2.0 Exp",
     },
     "🌊 Mistral AI": {
         "id": "mistral",
@@ -450,14 +450,22 @@ def call_ai(provider_name, model, messages, system_prompt, temperature, max_toke
         for m in messages:
             role = "user" if m["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": m["content"]}]})
+        # Gemini free API sometimes rejects systemInstruction — wrap it safely
         payload = {
-            "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
         }
+        if system_prompt and system_prompt.strip():
+            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        if not resp.ok:
+            err_msg = resp.json().get("error", {}).get("message", resp.text)
+            raise ValueError(f"Gemini API error {resp.status_code}: {err_msg}")
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            raise ValueError(f"Gemini returned no candidates. Response: {data}")
+        return candidates[0]["content"]["parts"][0]["text"]
 
     elif pid == "cohere":
         headers["Authorization"] = f"Bearer {api_key}"
@@ -650,6 +658,10 @@ for key, val in {
     "provider_usage": {},
     "session_start":  datetime.now().isoformat(),
     "mood_log":       [],
+    "research_reports": [],
+    "prompt_tab_result": None,
+    "prompt_tab_query":  "",
+    "_run_prompt_tab":   False,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -1058,70 +1070,200 @@ with tab_chat:
 # ══════════════════════════════════════════════════════════════════
 with tab_prompts:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:0.5rem;">💡 PROMPT LIBRARY</div>', unsafe_allow_html=True)
-    st.markdown('<p style="color:#4a2a22;font-size:0.82rem;margin-bottom:1.2rem;font-family:\'JetBrains Mono\',monospace;">Click any prompt to load it into the chat</p>', unsafe_allow_html=True)
 
-    # Prompt search
-    prompt_search = st.text_input("🔍 Search prompts", placeholder="Search library…", key="prompt_search")
+    # Initialize prompt tab session state
+    if "prompt_tab_result" not in st.session_state:
+        st.session_state.prompt_tab_result = None
+    if "prompt_tab_query" not in st.session_state:
+        st.session_state.prompt_tab_query = ""
 
-    all_prompts_flat = [(cat, p) for cat, prompts in PROMPT_LIBRARY.items() for p in prompts]
-    if prompt_search:
-        filtered = [(cat, p) for cat, p in all_prompts_flat if prompt_search.lower() in p.lower()]
-        st.markdown(f'<div style="font-size:0.72rem;color:#ff6b35;font-family:\'JetBrains Mono\',monospace;margin-bottom:8px;">{len(filtered)} prompts found</div>', unsafe_allow_html=True)
-        for cat, prompt in filtered:
-            col_p, col_b = st.columns([5, 1])
-            with col_p:
-                st.markdown(f'<div style="padding:6px 0;color:#e8d5c8;font-family:\'Crimson Pro\',serif;font-size:0.95rem;"><span style="font-size:0.7rem;color:#4a2a22;">{cat}</span> · {prompt}</div>', unsafe_allow_html=True)
-            with col_b:
-                if st.button("Use", key=f"search_lib_{hash(prompt)}", use_container_width=True):
-                    st.session_state._pending_prompt = prompt
-                    st.rerun()
-    else:
-        for category, prompts in PROMPT_LIBRARY.items():
-            with st.expander(category, expanded=False):
-                for prompt in prompts:
-                    col_p, col_b = st.columns([5, 1])
-                    with col_p:
-                        st.markdown(f'<div style="padding:6px 0;color:#e8d5c8;font-family:\'Crimson Pro\',serif;font-size:0.95rem;">{prompt}</div>', unsafe_allow_html=True)
-                    with col_b:
-                        if st.button("Use", key=f"lib_{hash(prompt)}", use_container_width=True):
+    # ── Mode toggle ──
+    prompt_mode = st.radio(
+        "Where to send response:",
+        ["💬 Chat Only", "📄 Show Here (Prompts Tab)", "📄+💬 Both"],
+        horizontal=True, key="prompt_mode_radio",
+        label_visibility="visible",
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Left panel: Library, Right panel: Response ──
+    col_lib, col_resp = st.columns([1, 1])
+
+    with col_lib:
+        # Prompt search
+        prompt_search = st.text_input("🔍 Search prompts", placeholder="Search library…", key="prompt_search")
+
+        all_prompts_flat = [(cat, p) for cat, prompts in PROMPT_LIBRARY.items() for p in prompts]
+        if prompt_search:
+            filtered = [(cat, p) for cat, p in all_prompts_flat if prompt_search.lower() in p.lower()]
+            st.markdown(f'<div style="font-size:0.72rem;color:#ff6b35;font-family:\'JetBrains Mono\',monospace;margin-bottom:8px;">{len(filtered)} prompts found</div>', unsafe_allow_html=True)
+            for cat, prompt in filtered:
+                col_p, col_b = st.columns([4, 1])
+                with col_p:
+                    st.markdown(f'<div style="padding:5px 0;color:#e8d5c8;font-family:\'Crimson Pro\',serif;font-size:0.9rem;"><span style="font-size:0.65rem;color:#4a2a22;">{cat}</span><br>{prompt}</div>', unsafe_allow_html=True)
+                with col_b:
+                    if st.button("▶", key=f"search_lib_{hash(prompt)}", use_container_width=True, help="Run this prompt"):
+                        if prompt_mode == "💬 Chat Only":
                             st.session_state._pending_prompt = prompt
                             st.rerun()
+                        else:
+                            st.session_state.prompt_tab_query = prompt
+                            st.session_state.prompt_tab_result = None
+                            st.session_state._run_prompt_tab = True
+                            if prompt_mode == "📄+💬 Both":
+                                st.session_state._pending_prompt = prompt
+        else:
+            for category, prompts in PROMPT_LIBRARY.items():
+                with st.expander(category, expanded=False):
+                    for prompt in prompts:
+                        col_p, col_b = st.columns([4, 1])
+                        with col_p:
+                            st.markdown(f'<div style="padding:5px 0;color:#e8d5c8;font-family:\'Crimson Pro\',serif;font-size:0.9rem;">{prompt}</div>', unsafe_allow_html=True)
+                        with col_b:
+                            if st.button("▶", key=f"lib_{hash(prompt)}", use_container_width=True):
+                                if prompt_mode == "💬 Chat Only":
+                                    st.session_state._pending_prompt = prompt
+                                    st.rerun()
+                                else:
+                                    st.session_state.prompt_tab_query = prompt
+                                    st.session_state.prompt_tab_result = None
+                                    st.session_state._run_prompt_tab = True
+                                    if prompt_mode == "📄+💬 Both":
+                                        st.session_state._pending_prompt = prompt
 
-    st.divider()
+        st.divider()
 
-    # Favorites section
-    st.markdown('<div style="font-size:0.76rem;color:#f7c948;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">⭐ FAVORITES</div>', unsafe_allow_html=True)
-    if st.session_state.favorites:
-        for i, fav in enumerate(st.session_state.favorites):
-            col_f, col_fb, col_fd = st.columns([4, 1, 1])
-            with col_f:
-                st.markdown(f'<div style="padding:5px 0;color:#e8d5c8;font-size:0.9rem;font-family:\'Crimson Pro\',serif;">{fav}</div>', unsafe_allow_html=True)
-            with col_fb:
-                if st.button("Use", key=f"fav_use_{i}", use_container_width=True):
-                    st.session_state._pending_prompt = fav
+        # Favorites section
+        st.markdown('<div style="font-size:0.76rem;color:#f7c948;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">⭐ FAVORITES</div>', unsafe_allow_html=True)
+        if st.session_state.favorites:
+            for i, fav in enumerate(st.session_state.favorites):
+                col_f, col_fb, col_fd = st.columns([3, 1, 1])
+                with col_f:
+                    st.markdown(f'<div style="padding:5px 0;color:#e8d5c8;font-size:0.85rem;font-family:\'Crimson Pro\',serif;">{fav[:60]}{"…" if len(fav)>60 else ""}</div>', unsafe_allow_html=True)
+                with col_fb:
+                    if st.button("▶", key=f"fav_use_{i}", use_container_width=True):
+                        if prompt_mode == "💬 Chat Only":
+                            st.session_state._pending_prompt = fav
+                            st.rerun()
+                        else:
+                            st.session_state.prompt_tab_query = fav
+                            st.session_state.prompt_tab_result = None
+                            st.session_state._run_prompt_tab = True
+                            if prompt_mode == "📄+💬 Both":
+                                st.session_state._pending_prompt = fav
+                with col_fd:
+                    if st.button("🗑", key=f"fav_del_{i}", use_container_width=True):
+                        st.session_state.favorites.pop(i)
+                        st.rerun()
+        else:
+            st.markdown('<div style="color:#4a2a22;font-size:0.8rem;font-family:\'JetBrains Mono\',monospace;">No favorites yet</div>', unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown('<div style="font-size:0.8rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:8px;">✏️ CUSTOM PROMPT</div>', unsafe_allow_html=True)
+        custom_prompt = st.text_area("", placeholder="Type your own prompt…", height=80, label_visibility="collapsed", key="custom_prompt_input")
+        col_cp1, col_cp2 = st.columns(2)
+        with col_cp1:
+            if st.button("🔥 Run Prompt", use_container_width=True):
+                if custom_prompt.strip():
+                    if prompt_mode == "💬 Chat Only":
+                        st.session_state._pending_prompt = custom_prompt.strip()
+                        st.rerun()
+                    else:
+                        st.session_state.prompt_tab_query = custom_prompt.strip()
+                        st.session_state.prompt_tab_result = None
+                        st.session_state._run_prompt_tab = True
+                        if prompt_mode == "📄+💬 Both":
+                            st.session_state._pending_prompt = custom_prompt.strip()
+        with col_cp2:
+            if st.button("⭐ Save to Favorites", use_container_width=True):
+                if custom_prompt.strip() and custom_prompt.strip() not in st.session_state.favorites:
+                    st.session_state.favorites.append(custom_prompt.strip())
+                    st.success("Added to favorites!")
                     st.rerun()
-            with col_fd:
-                if st.button("🗑", key=f"fav_del_{i}", use_container_width=True):
-                    st.session_state.favorites.pop(i)
-                    st.rerun()
-    else:
-        st.markdown('<div style="color:#4a2a22;font-size:0.8rem;font-family:\'JetBrains Mono\',monospace;">No favorites yet — add your custom prompts below</div>', unsafe_allow_html=True)
 
-    st.divider()
-    st.markdown('<div style="font-size:0.8rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:8px;">✏️ CUSTOM PROMPT</div>', unsafe_allow_html=True)
-    custom_prompt = st.text_area("", placeholder="Type your own prompt…", height=80, label_visibility="collapsed", key="custom_prompt_input")
-    col_cp1, col_cp2 = st.columns(2)
-    with col_cp1:
-        if st.button("🔥 Send Custom Prompt", use_container_width=True):
-            if custom_prompt.strip():
-                st.session_state._pending_prompt = custom_prompt.strip()
-                st.rerun()
-    with col_cp2:
-        if st.button("⭐ Save to Favorites", use_container_width=True):
-            if custom_prompt.strip() and custom_prompt.strip() not in st.session_state.favorites:
-                st.session_state.favorites.append(custom_prompt.strip())
-                st.success("Added to favorites!")
-                st.rerun()
+    # ── Right panel: Inline AI Response ──
+    with col_resp:
+        st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">📄 INLINE RESPONSE</div>', unsafe_allow_html=True)
+
+        # Run the prompt if triggered
+        if st.session_state.get("_run_prompt_tab") and st.session_state.prompt_tab_query:
+            st.session_state._run_prompt_tab = False
+            if not active_api_key:
+                st.error("⚠ No API key configured.")
+            else:
+                run_query = st.session_state.prompt_tab_query
+                system_prompt_pt = PERSONAS.get(persona, PERSONAS["🔥 Phoenix"])
+                system_prompt_pt += "\n\nRespond in a clear, well-structured way. Use markdown formatting when helpful."
+                with st.spinner(f"🔥 Generating response…"):
+                    try:
+                        t0 = time.time()
+                        pt_response = call_ai(
+                            provider, model_sel,
+                            [{"role":"user","content":run_query}],
+                            system_prompt_pt,
+                            temperature, max_tokens, active_api_key
+                        )
+                        pt_rt = round(time.time() - t0, 2)
+                        pt_tokens = count_tokens_approx(pt_response)
+                        st.session_state.prompt_tab_result = {
+                            "query": run_query, "response": pt_response,
+                            "rt": pt_rt, "tokens": pt_tokens,
+                            "model": model_sel,
+                        }
+                    except Exception as e:
+                        st.session_state.prompt_tab_result = {"error": str(e)}
+
+        if st.session_state.prompt_tab_result:
+            res = st.session_state.prompt_tab_result
+            if "error" in res:
+                st.markdown(f'<div style="background:#120407;border:1px solid #7f1d1d;border-left:3px solid #e63946;border-radius:10px;padding:14px;color:#e63946;font-size:0.82rem;font-family:\'JetBrains Mono\',monospace;">⚠ Error: {res["error"]}</div>', unsafe_allow_html=True)
+            else:
+                # Query shown
+                st.markdown(f"""
+                <div style="background:#1d0b0e;border:1px solid #ff8c4222;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+                    <div style="font-size:0.62rem;color:#ff8c42;font-family:'JetBrains Mono',monospace;margin-bottom:4px;">YOUR PROMPT</div>
+                    <div style="color:#fdf0e8;font-size:0.9rem;font-family:'Crimson Pro',serif;">{res['query']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Stats bar
+                st.markdown(f"""
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                    <span style="font-size:0.66rem;padding:3px 10px;border-radius:8px;background:#ff6b3510;color:#ff6b35;border:1px solid #ff6b3522;font-family:'JetBrains Mono',monospace;">⏱ {res['rt']:.1f}s</span>
+                    <span style="font-size:0.66rem;padding:3px 10px;border-radius:8px;background:#f7c94810;color:#f7c948;border:1px solid #f7c94822;font-family:'JetBrains Mono',monospace;">⚡ ~{res['tokens']} tokens</span>
+                    <span style="font-size:0.66rem;padding:3px 10px;border-radius:8px;background:#c084fc10;color:#c084fc;border:1px solid #c084fc22;font-family:'JetBrains Mono',monospace;">🤖 {res['model']}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Response content
+                st.markdown(f"""
+                <div style="background:#0d0406;border:1px solid #2a1015;border-left:3px solid #ff6b35;border-radius:10px;
+                    padding:18px;color:#e8d5c8;font-family:'Crimson Pro',serif;font-size:0.97rem;
+                    line-height:1.8;max-height:60vh;overflow-y:auto;">
+                    {format_content(res['response'])}
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Actions
+                col_act1, col_act2 = st.columns(2)
+                with col_act1:
+                    if st.button("💬 Send to Chat", key="pt_to_chat", use_container_width=True):
+                        st.session_state._pending_prompt = res["query"]
+                        st.rerun()
+                with col_act2:
+                    st.download_button("📥 Download", data=f"Prompt: {res['query']}\n\nResponse:\n{res['response']}",
+                        file_name="phoenix_prompt_response.txt", mime="text/plain",
+                        key="pt_download", use_container_width=True)
+        else:
+            st.markdown("""
+            <div style="background:#0d0406;border:1px solid #2a1015;border-radius:12px;padding:40px 20px;
+                text-align:center;color:#4a2a22;font-family:'JetBrains Mono',monospace;font-size:0.8rem;min-height:300px;
+                display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;">
+                <div style="font-size:2.5rem;animation:float 3s ease-in-out infinite;">📄</div>
+                <div>Select "Show Here" or "Both" mode,<br>then click ▶ next to any prompt<br>to see the AI response here</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1331,114 +1473,289 @@ with tab_analytics:
 with tab_nlp:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">🔬 NLP ANALYSIS LAB</div>', unsafe_allow_html=True)
 
-    nlp_text = st.text_area("Enter text to analyze",
-        placeholder="Paste any text here for real-time NLP analysis…",
-        height=130, key="nlp_input")
+    nlp_subtab_local, nlp_subtab_ai = st.tabs(["📊 Local Text Analysis", "🧠 AI Deep Research Report"])
 
-    if nlp_text.strip():
-        sent, score = sentiment_score(nlp_text)
-        intent      = detect_intent(nlp_text)
-        keywords    = extract_keywords(nlp_text)
-        token_est   = count_tokens_approx(nlp_text)
-        words       = len(nlp_text.split())
-        sents       = len(re.split(r'[.!?]+', nlp_text))
-        avg_wl      = sum(len(w) for w in nlp_text.split()) / max(1, words)
-        read        = readability_score(nlp_text)
+    # ── SUB-TAB A: Local NLP Analysis ──────────────────────────────
+    with nlp_subtab_local:
+        nlp_text = st.text_area("Enter text to analyze",
+            placeholder="Paste any text here for real-time NLP analysis…",
+            height=130, key="nlp_input")
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Sentiment", sent.title())
-        c2.metric("Confidence", f"{score:.0%}")
-        c3.metric("Intent", intent)
-        c4.metric("Tokens", f"~{token_est}")
+        if nlp_text.strip():
+            sent, score = sentiment_score(nlp_text)
+            intent      = detect_intent(nlp_text)
+            keywords    = extract_keywords(nlp_text)
+            token_est   = count_tokens_approx(nlp_text)
+            words       = len(nlp_text.split())
+            sents       = len(re.split(r'[.!?]+', nlp_text))
+            avg_wl      = sum(len(w) for w in nlp_text.split()) / max(1, words)
+            read        = readability_score(nlp_text)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        ca, cb, cc = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Sentiment", sent.title())
+            c2.metric("Confidence", f"{score:.0%}")
+            c3.metric("Intent", intent)
+            c4.metric("Tokens", f"~{token_est}")
 
-        with ca:
-            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">📊 TEXT STATISTICS</div>', unsafe_allow_html=True)
-            complexity = 'High' if avg_wl > 5.5 else 'Medium' if avg_wl > 4 else 'Low'
-            st.markdown(f"""
-            <div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:16px;font-family:'JetBrains Mono',monospace;">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:0.76rem;">
-                    <div style="color:#4a2a22;">Characters</div><div style="color:#ff6b35;font-weight:700;">{len(nlp_text):,}</div>
-                    <div style="color:#4a2a22;">Words</div><div style="color:#ff6b35;font-weight:700;">{words:,}</div>
-                    <div style="color:#4a2a22;">Sentences</div><div style="color:#ff6b35;font-weight:700;">{sents}</div>
-                    <div style="color:#4a2a22;">Avg Word Len</div><div style="color:#ff6b35;font-weight:700;">{avg_wl:.1f} chars</div>
-                    <div style="color:#4a2a22;">Reading Time</div><div style="color:#f7c948;font-weight:700;">~{max(1,words//200)} min</div>
-                    <div style="color:#4a2a22;">Complexity</div><div style="color:#ff8c42;font-weight:700;">{complexity}</div>
-                    <div style="color:#4a2a22;">Readability</div><div style="color:#52b788;font-weight:700;">{read}</div>
-                    <div style="color:#4a2a22;">Token/Word</div><div style="color:#c8917a;font-weight:700;">{token_est/max(1,words):.1f}x</div>
+            st.markdown("<br>", unsafe_allow_html=True)
+            ca, cb, cc = st.columns(3)
+
+            with ca:
+                st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">📊 TEXT STATISTICS</div>', unsafe_allow_html=True)
+                complexity = 'High' if avg_wl > 5.5 else 'Medium' if avg_wl > 4 else 'Low'
+                st.markdown(f"""
+                <div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:16px;font-family:'JetBrains Mono',monospace;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:0.76rem;">
+                        <div style="color:#4a2a22;">Characters</div><div style="color:#ff6b35;font-weight:700;">{len(nlp_text):,}</div>
+                        <div style="color:#4a2a22;">Words</div><div style="color:#ff6b35;font-weight:700;">{words:,}</div>
+                        <div style="color:#4a2a22;">Sentences</div><div style="color:#ff6b35;font-weight:700;">{sents}</div>
+                        <div style="color:#4a2a22;">Avg Word Len</div><div style="color:#ff6b35;font-weight:700;">{avg_wl:.1f} chars</div>
+                        <div style="color:#4a2a22;">Reading Time</div><div style="color:#f7c948;font-weight:700;">~{max(1,words//200)} min</div>
+                        <div style="color:#4a2a22;">Complexity</div><div style="color:#ff8c42;font-weight:700;">{complexity}</div>
+                        <div style="color:#4a2a22;">Readability</div><div style="color:#52b788;font-weight:700;">{read}</div>
+                        <div style="color:#4a2a22;">Token/Word</div><div style="color:#c8917a;font-weight:700;">{token_est/max(1,words):.1f}x</div>
+                    </div>
                 </div>
+                """, unsafe_allow_html=True)
+
+            with cb:
+                st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">🔑 TOP KEYWORDS</div>', unsafe_allow_html=True)
+                if keywords:
+                    mf = keywords[0][1]
+                    colors_kw = ["#ff6b35","#f7c948","#ff8c42","#e63946","#52b788","#c084fc","#74c0fc","#fb923c"]
+                    kw_html = ""
+                    for i, (word, freq) in enumerate(keywords[:8]):
+                        w = int(freq / mf * 100)
+                        c = colors_kw[i % len(colors_kw)]
+                        kw_html += f"""<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+                            <span style="font-size:0.72rem;color:{c};min-width:80px;font-weight:700;font-family:'JetBrains Mono',monospace;">{word}</span>
+                            <div style="flex:1;height:5px;background:#1d0b0e;border-radius:3px;overflow:hidden;">
+                                <div style="width:{w}%;height:100%;background:{c};border-radius:3px;box-shadow:0 0 6px {c};"></div>
+                            </div>
+                            <span style="font-size:0.64rem;color:#4a2a22;min-width:16px;text-align:right;">{freq}</span>
+                        </div>"""
+                    st.markdown(f'<div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:16px;">{kw_html}</div>', unsafe_allow_html=True)
+
+            with cc:
+                sc_color = {"positive":"#52b788","negative":"#e63946","neutral":"#c8917a"}.get(sent,"#c8917a")
+                gauge = go.Figure(go.Indicator(
+                    mode="gauge+number", value=score * 100,
+                    domain={'x':[0,1],'y':[0,1]},
+                    title={'text':f"Sentiment: {sent.title()}", 'font':{'color':'#fdf0e8','size':12,'family':'Cinzel'}},
+                    number={'font':{'color':sc_color,'size':26,'family':'Cinzel'},'suffix':'%'},
+                    gauge={
+                        'axis':{'range':[0,100],'tickcolor':'#4a2a22','tickfont':{'color':'#4a2a22'}},
+                        'bar':{'color':sc_color,'thickness':0.25},
+                        'bgcolor':'#2a1015','bordercolor':'#3a1a20',
+                        'steps':[{'range':[0,40],'color':'#0d0406'},{'range':[40,70],'color':'#120508'},{'range':[70,100],'color':'#170608'}],
+                        'threshold':{'line':{'color':sc_color,'width':2},'thickness':0.75,'value':score*100}
+                    }
+                ))
+                gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#c8917a"),
+                    height=220, margin=dict(t=40,b=10,l=30,r=30))
+                st.plotly_chart(gauge, use_container_width=True)
+
+            # Keyword frequency bar chart
+            if keywords:
+                st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:10px 0 8px;font-family:\'JetBrains Mono\',monospace;">📈 KEYWORD FREQUENCY CHART</div>', unsafe_allow_html=True)
+                kw_words = [k[0] for k in keywords]
+                kw_freqs = [k[1] for k in keywords]
+                fig_kw = go.Figure(go.Bar(
+                    x=kw_words, y=kw_freqs,
+                    marker=dict(color=kw_freqs,
+                        colorscale=[[0,"#2a1015"],[0.3,"#ff6b35"],[0.7,"#f7c948"],[1,"#52b788"]],
+                        line=dict(color='rgba(0,0,0,0)'),
+                    ),
+                    text=kw_freqs, textposition='auto',
+                    textfont=dict(color='#fdf0e8', size=11),
+                ))
+                fig_kw.update_layout(
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#c8917a"),
+                    xaxis=dict(gridcolor="#2a1015", color="#c8917a"),
+                    yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Count"),
+                    margin=dict(t=20, b=30, l=40, r=20), height=250,
+                )
+                st.plotly_chart(fig_kw, use_container_width=True)
+
+        else:
+            st.markdown("""
+            <div style="text-align:center;padding:3rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">
+                <div style="font-size:3rem;margin-bottom:1rem;animation:float 3s ease-in-out infinite;display:inline-block;">🔬</div>
+                <div>Enter any text above to run local NLP analysis</div>
             </div>
             """, unsafe_allow_html=True)
 
-        with cb:
-            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">🔑 TOP KEYWORDS</div>', unsafe_allow_html=True)
-            if keywords:
-                mf = keywords[0][1]
-                colors_kw = ["#ff6b35","#f7c948","#ff8c42","#e63946","#52b788","#c084fc","#74c0fc","#fb923c"]
-                kw_html = ""
-                for i, (word, freq) in enumerate(keywords[:8]):
-                    w = int(freq / mf * 100)
-                    c = colors_kw[i % len(colors_kw)]
-                    kw_html += f"""<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
-                        <span style="font-size:0.72rem;color:{c};min-width:80px;font-weight:700;font-family:'JetBrains Mono',monospace;">{word}</span>
-                        <div style="flex:1;height:5px;background:#1d0b0e;border-radius:3px;overflow:hidden;">
-                            <div style="width:{w}%;height:100%;background:{c};border-radius:3px;box-shadow:0 0 6px {c};"></div>
-                        </div>
-                        <span style="font-size:0.64rem;color:#4a2a22;min-width:16px;text-align:right;">{freq}</span>
-                    </div>"""
-                st.markdown(f'<div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:16px;">{kw_html}</div>', unsafe_allow_html=True)
-
-        with cc:
-            sc_color = {"positive":"#52b788","negative":"#e63946","neutral":"#c8917a"}.get(sent,"#c8917a")
-            gauge = go.Figure(go.Indicator(
-                mode="gauge+number", value=score * 100,
-                domain={'x':[0,1],'y':[0,1]},
-                title={'text':f"Sentiment: {sent.title()}", 'font':{'color':'#fdf0e8','size':12,'family':'Cinzel'}},
-                number={'font':{'color':sc_color,'size':26,'family':'Cinzel'},'suffix':'%'},
-                gauge={
-                    'axis':{'range':[0,100],'tickcolor':'#4a2a22','tickfont':{'color':'#4a2a22'}},
-                    'bar':{'color':sc_color,'thickness':0.25},
-                    'bgcolor':'#2a1015','bordercolor':'#3a1a20',
-                    'steps':[{'range':[0,40],'color':'#0d0406'},{'range':[40,70],'color':'#120508'},{'range':[70,100],'color':'#170608'}],
-                    'threshold':{'line':{'color':sc_color,'width':2},'thickness':0.75,'value':score*100}
-                }
-            ))
-            gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#c8917a"),
-                height=220, margin=dict(t=40,b=10,l=30,r=30))
-            st.plotly_chart(gauge, use_container_width=True)
-
-        # Keyword frequency bar chart
-        if keywords:
-            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:10px 0 8px;font-family:\'JetBrains Mono\',monospace;">📈 KEYWORD FREQUENCY CHART</div>', unsafe_allow_html=True)
-            kw_words = [k[0] for k in keywords]
-            kw_freqs = [k[1] for k in keywords]
-            fig_kw = go.Figure(go.Bar(
-                x=kw_words, y=kw_freqs,
-                marker=dict(color=kw_freqs,
-                    colorscale=[[0,"#2a1015"],[0.3,"#ff6b35"],[0.7,"#f7c948"],[1,"#52b788"]],
-                    line=dict(color='rgba(0,0,0,0)'),
-                ),
-                text=kw_freqs, textposition='auto',
-                textfont=dict(color='#fdf0e8', size=11),
-            ))
-            fig_kw.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#c8917a"),
-                xaxis=dict(gridcolor="#2a1015", color="#c8917a"),
-                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Count"),
-                margin=dict(t=20, b=30, l=40, r=20), height=250,
-            )
-            st.plotly_chart(fig_kw, use_container_width=True)
-
-    else:
+    # ── SUB-TAB B: AI Deep Research Report ─────────────────────────
+    with nlp_subtab_ai:
         st.markdown("""
-        <div style="text-align:center;padding:3rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">
-            <div style="font-size:3rem;margin-bottom:1rem;animation:float 3s ease-in-out infinite;display:inline-block;">🔬</div>
-            <div>Enter any text above to run NLP analysis</div>
+        <div style="background:#0d0406;border:1px solid #ff6b3522;border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:0.82rem;color:#c8917a;font-family:'Crimson Pro',serif;line-height:1.7;">
+            🧠 <strong style="color:#ff6b35;">AI Deep Research Report</strong> — Enter any topic, question, or scenario and the AI will generate a comprehensive, structured research report with sections on overview, key concepts, analysis, use cases, pros/cons, and recommendations.
         </div>
         """, unsafe_allow_html=True)
+
+        research_query = st.text_area(
+            "Research Topic / Question / Situation",
+            placeholder="e.g. 'Explain transformer attention mechanisms in LLMs'\nor 'Analyze the pros and cons of microservices vs monolith'\nor 'Research report on climate change impact on agriculture'\nor 'What caused the 2008 financial crisis?'",
+            height=110,
+            key="research_query_input"
+        )
+
+        col_rd1, col_rd2 = st.columns(2)
+        with col_rd1:
+            report_depth = st.selectbox("Report Depth", [
+                "Quick Summary (300 words)",
+                "Standard Report (600 words)",
+                "Detailed Analysis (1000 words)",
+                "Comprehensive Deep-Dive (1500+ words)",
+            ], index=1, key="report_depth")
+        with col_rd2:
+            report_style = st.selectbox("Report Style", [
+                "🔬 Academic / Scientific",
+                "💼 Business / Executive",
+                "🎓 Educational / Beginner-friendly",
+                "💻 Technical / Developer-focused",
+                "📰 Journalistic / Narrative",
+            ], index=0, key="report_style")
+
+        if st.button("🔥 Generate Deep Research Report", use_container_width=True, key="gen_research_btn"):
+            if not research_query.strip():
+                st.warning("Please enter a research topic or question.")
+            elif not active_api_key:
+                st.error("⚠ No API key configured in the sidebar.")
+            else:
+                depth_tokens = {"Quick Summary (300 words)": 500, "Standard Report (600 words)": 900,
+                                "Detailed Analysis (1000 words)": 1500, "Comprehensive Deep-Dive (1500+ words)": 2500}
+                max_report_tokens = depth_tokens.get(report_depth, 900)
+                style_desc = report_style.split(" ", 1)[1]
+
+                research_prompt = f"""You are an expert research analyst. Write a {report_depth} in a {style_desc} style on the following topic:
+
+TOPIC: {research_query}
+
+Structure your report with ALL of the following sections using clear markdown headers:
+
+# Research Report: {research_query[:80]}
+
+## 📋 Executive Summary
+[2-3 sentence overview of the topic and key findings]
+
+## 🔍 Background & Context
+[Historical context, why this topic matters, current state]
+
+## 🧩 Key Concepts & Components
+[Break down the main ideas, terms, mechanisms involved]
+
+## 📊 Detailed Analysis
+[Deep dive into the topic — mechanisms, causes, effects, how it works]
+
+## ✅ Advantages / Strengths
+[What works well, benefits, positive aspects]
+
+## ⚠️ Challenges / Limitations
+[Problems, risks, drawbacks, open questions]
+
+## 💡 Real-World Applications / Use Cases
+[Concrete examples of where/how this is applied]
+
+## 🔮 Future Outlook & Trends
+[Where is this heading? Emerging developments]
+
+## 📌 Key Takeaways & Recommendations
+[Bullet points of the most important things to remember + actionable recommendations]
+
+## 📚 Further Reading Suggestions
+[3-5 suggested topics or resources the reader should explore next]
+
+Be thorough, accurate, well-structured, and use specific examples. Do NOT be vague or generic."""
+
+                with st.spinner(f"🔥 Generating {report_depth} on: {research_query[:60]}…"):
+                    try:
+                        t0 = time.time()
+                        report_response = call_ai(
+                            provider, model_sel,
+                            [{"role": "user", "content": research_prompt}],
+                            "You are an expert research analyst and writer. Always produce structured, detailed, accurate reports with concrete examples and specific insights. Never give vague or generic answers.",
+                            0.4, max_report_tokens, active_api_key
+                        )
+                        rt_report = round(time.time() - t0, 2)
+
+                        # Save report to session
+                        if "research_reports" not in st.session_state:
+                            st.session_state.research_reports = []
+                        st.session_state.research_reports.append({
+                            "query": research_query,
+                            "report": report_response,
+                            "depth": report_depth,
+                            "style": report_style,
+                            "model": model_sel,
+                            "rt": rt_report,
+                            "timestamp": datetime.now().strftime("%H:%M %d/%m"),
+                            "tokens": count_tokens_approx(report_response),
+                        })
+
+                        # Display report header
+                        st.markdown(f"""
+                        <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid #ff6b3540;
+                            border-radius:16px;padding:6px 20px 4px;margin:12px 0 0;position:relative;">
+                            <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                                background:linear-gradient(90deg,transparent,#ff6b35,#f7c948,#c084fc,transparent);"></div>
+                            <div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 0;font-family:'JetBrains Mono',monospace;font-size:0.68rem;">
+                                <span style="color:#52b788;">✅ Report Generated</span>
+                                <span style="color:#ff6b35;">⏱ {rt_report}s</span>
+                                <span style="color:#f7c948;">⚡ ~{count_tokens_approx(report_response):,} tokens</span>
+                                <span style="color:#c084fc;">📖 {len(report_response.split())} words</span>
+                                <span style="color:#74c0fc;">🤖 {model_sel}</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # Render formatted report
+                        st.markdown(f"""
+                        <div style="background:#0d0406;border:1px solid #2a1015;border-radius:0 0 16px 16px;
+                            padding:24px;font-family:'Crimson Pro',serif;font-size:1rem;color:#e8d5c8;line-height:1.85;
+                            max-height:75vh;overflow-y:auto;">
+                            {format_content(report_response)}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # Export report
+                        st.download_button(
+                            "📥 Download Report as .txt",
+                            data=f"PHOENIX AI RESEARCH REPORT\n{'='*50}\nTopic: {research_query}\nModel: {model_sel}\nDepth: {report_depth}\nStyle: {report_style}\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\nTime: {rt_report}s\n{'='*50}\n\n{report_response}",
+                            file_name=f"phoenix_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                            mime="text/plain",
+                            use_container_width=True,
+                        )
+
+                        # Send to chat button
+                        if st.button("💬 Discuss this report in Chat", use_container_width=True, key="report_to_chat"):
+                            st.session_state._pending_prompt = f"I just read a research report about: {research_query}\n\nCan you elaborate on the most important aspect of this topic and give me specific actionable insights?"
+                            st.rerun()
+
+                    except Exception as e:
+                        st.error(f"⚠ Report generation failed: {str(e)}")
+                        st.markdown(f'<div style="background:#120407;border:1px solid #7f1d1d;border-left:3px solid #e63946;border-radius:10px;padding:14px;color:#e63946;font-size:0.82rem;font-family:\'JetBrains Mono\',monospace;">Error details: {str(e)}<br><br>Tips: Make sure your API key is correct and you have selected the right provider in the sidebar.</div>', unsafe_allow_html=True)
+
+        # Previous reports
+        if "research_reports" in st.session_state and st.session_state.research_reports:
+            st.divider()
+            st.markdown(f'<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">📁 SAVED REPORTS ({len(st.session_state.research_reports)})</div>', unsafe_allow_html=True)
+            for i, rpt in enumerate(reversed(st.session_state.research_reports[-5:])):
+                with st.expander(f"📄 {rpt['query'][:60]}… · {rpt['timestamp']} · {rpt['model']}", expanded=False):
+                    st.markdown(f'<div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:16px;font-family:\'Crimson Pro\',serif;font-size:0.95rem;color:#e8d5c8;line-height:1.8;max-height:400px;overflow-y:auto;">{format_content(rpt["report"])}</div>', unsafe_allow_html=True)
+                    st.download_button(
+                        "📥 Download", data=rpt["report"],
+                        file_name=f"report_{i}.txt", mime="text/plain",
+                        key=f"dl_report_{i}", use_container_width=True
+                    )
+        else:
+            st.markdown("""
+            <div style="text-align:center;padding:3rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">
+                <div style="font-size:3rem;margin-bottom:1rem;animation:float 3s ease-in-out infinite;display:inline-block;">🧠</div>
+                <div>Enter a topic above to generate your first AI research report</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1778,30 +2095,31 @@ KEY_POINT: [The single most important thing to remember]"""
 
                     response = call_ai(provider, model_sel,
                         [{"role":"user","content":prompt}],
-                        "You are an expert educator creating clear, accurate flashcards.",
-                        0.5, 600, active_api_key)
+                        "You are an expert educator creating clear, accurate, detailed flashcards. Always follow the exact format requested.",
+                        0.5, 800, active_api_key)
 
-                    # Parse response
-                    lines = response.strip().split('\n')
+                    # Robust parsing — handles varied model output formats
                     parsed = {}
                     current_key = None
-                    for line in lines:
+                    for line in response.strip().split('\n'):
+                        matched = False
                         for key in ["FRONT:", "BACK:", "EXAMPLE:", "KEY_POINT:"]:
-                            if line.startswith(key):
+                            if line.strip().upper().startswith(key):
                                 current_key = key.replace(":", "").lower()
-                                parsed[current_key] = line[len(key):].strip()
+                                parsed[current_key] = line.strip()[len(key):].strip()
+                                matched = True
                                 break
-                        else:
-                            if current_key and line.strip():
-                                parsed[current_key] = parsed.get(current_key, "") + " " + line.strip()
+                        if not matched and current_key and line.strip():
+                            parsed[current_key] = parsed.get(current_key, "") + " " + line.strip()
 
-                    front = parsed.get("front", "?")
-                    back  = parsed.get("back", response)
-                    example = parsed.get("example", "")
+                    front     = parsed.get("front", f"What is {final_topic}?")
+                    back      = parsed.get("back", response[:600])
+                    example   = parsed.get("example", "")
                     key_point = parsed.get("key_point", "")
 
+                    st.session_state.flashcard_idx += 1
+
                     st.markdown(f"""
-                    <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid #ff6b3540;
                         border-radius:16px;padding:24px;margin:12px 0;position:relative;overflow:hidden;">
                         <div style="position:absolute;top:0;left:0;right:0;height:2px;
                             background:linear-gradient(90deg,transparent,#ff6b35,#f7c948,transparent);"></div>
