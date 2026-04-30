@@ -450,7 +450,6 @@ def call_ai(provider_name, model, messages, system_prompt, temperature, max_toke
         for m in messages:
             role = "user" if m["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": m["content"]}]})
-        # Gemini free API sometimes rejects systemInstruction — wrap it safely
         payload = {
             "contents": contents,
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
@@ -828,9 +827,10 @@ tabs = st.tabs([
     "⚡ Benchmark",
     "🎯 Flashcards",
     "🌡️ Session Health",
+    "🆚 Model Comparisons",
     "🛠 Settings",
 ])
-tab_chat, tab_prompts, tab_analytics, tab_nlp, tab_deepstats, tab_notes, tab_bench, tab_flash, tab_health, tab_settings = tabs
+tab_chat, tab_prompts, tab_analytics, tab_nlp, tab_deepstats, tab_notes, tab_bench, tab_flash, tab_health, tab_modelcomp, tab_settings = tabs
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -852,44 +852,37 @@ with tab_chat:
         </div>
         """, unsafe_allow_html=True)
 
-    # ── ALWAYS-VISIBLE QUICK QUESTIONS PANEL ──────────────────────
     ALL_SUGGESTIONS = [
-        # Row 1 — Tech/Code
         ("🐍", "Python",      "Write a Python async REST API with FastAPI and SQLite"),
         ("🔥", "Transformers","Explain how transformer attention mechanisms work"),
         ("⚡", "Compare AI",  "Compare LLaMA 3, GPT-4o and Claude 3.5 architectures"),
         ("💻", "React",       "Create a React custom hook for debounced search input"),
         ("🐳", "Docker",      "Write a Docker Compose setup for a full-stack web app"),
         ("🦀", "Rust",        "Write a Rust CLI tool with clap argument parsing"),
-        # Row 2 — AI/ML
         ("🧠", "RAG vs FT",   "What's the difference between RAG and fine-tuning?"),
         ("📉", "Backprop",    "Explain backpropagation step by step with math"),
         ("🤖", "RLHF",        "How does RLHF train language models?"),
         ("🌀", "MoE",         "What is mixture of experts (MoE) architecture?"),
         ("📐", "Embeddings",  "Explain vector embeddings and cosine similarity"),
         ("🔮", "Diffusion",   "How do diffusion models generate images?"),
-        # Row 3 — Security
         ("🔐", "SQL Inject",  "Explain SQL injection and how to prevent it"),
         ("🔑", "OAuth",       "How does OAuth 2.0 + PKCE work step by step?"),
         ("🛡️", "OWASP",       "Explain OWASP Top 10 vulnerabilities with examples"),
         ("🔒", "Zero Trust",  "Explain zero-trust security architecture"),
         ("💀", "Buffer Overflow","What is a buffer overflow attack and how to exploit it?"),
         ("🧩", "JWT",         "How do JWT tokens work and what are their risks?"),
-        # Row 4 — Creative
         ("🌑", "Cyberpunk",   "Write a cyberpunk noir short story set in 2087"),
         ("🧙", "Fantasy",     "Create a fantasy world with a unique magic system"),
         ("🕵️", "Detective",   "Write a gripping noir detective scene"),
         ("🌌", "Sci-Fi",      "Write a hard sci-fi story about first contact"),
         ("🔥", "Fire Origin",  "Create a mythological origin story for fire"),
         ("🤖", "AI Poem",     "Compose a haiku sequence about artificial minds"),
-        # Row 5 — Data/System Design
         ("📦", "CAP Theorem", "Explain the CAP theorem with real-world examples"),
         ("🗃️", "LRU Cache",   "Best data structures for an LRU cache?"),
         ("🔀", "Hashing",     "How does consistent hashing work in distributed systems?"),
         ("📨", "Kafka",       "Explain Apache Kafka architecture and use cases"),
         ("🌊", "SQL vs NoSQL","Compare SQL vs NoSQL for different use cases"),
         ("🏗️", "Microservices","Microservices vs monolith — when to use each?"),
-        # Row 6 — Science/General
         ("⚛️", "Quantum",     "Explain quantum entanglement in simple terms"),
         ("🕳️", "Black Holes", "How do black holes form and evaporate?"),
         ("🧬", "CRISPR",      "How does CRISPR gene editing work?"),
@@ -898,7 +891,6 @@ with tab_chat:
         ("🧮", "Euler",       "Explain Euler's identity and its deep significance"),
     ]
 
-    # Group suggestions by category for the pills
     SUGG_CATEGORIES = {
         "💻 Code":    ALL_SUGGESTIONS[0:6],
         "🧠 AI/ML":   ALL_SUGGESTIONS[6:12],
@@ -908,7 +900,6 @@ with tab_chat:
         "🌍 Science": ALL_SUGGESTIONS[30:36],
     }
 
-    # Category filter
     st.markdown('<div style="font-size:0.62rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;letter-spacing:2px;margin-bottom:6px;">⚡ QUICK QUESTIONS — click any to ask instantly</div>', unsafe_allow_html=True)
 
     sugg_cat = st.radio("", list(SUGG_CATEGORIES.keys()), horizontal=True,
@@ -916,12 +907,10 @@ with tab_chat:
 
     active_suggestions = SUGG_CATEGORIES[sugg_cat]
 
-    # Render 2 rows of 3 buttons each
     for row_start in range(0, 6, 3):
         row_cols = st.columns(3)
         for col_idx, (icon, label, prompt) in enumerate(active_suggestions[row_start:row_start+3]):
             with row_cols[col_idx]:
-                btn_label = f"{icon} **{label}**\n{prompt[:42]}{'…' if len(prompt)>42 else ''}"
                 if st.button(prompt[:55] + ("…" if len(prompt)>55 else ""),
                              use_container_width=True,
                              key=f"qs_{sugg_cat}_{row_start}_{col_idx}",
@@ -989,11 +978,9 @@ with tab_chat:
         if not st.session_state.session_title and len(user_text) > 3:
             st.session_state.session_title = user_text[:50] + ("…" if len(user_text) > 50 else "")
 
-        # Track provider usage
         pid = pdata["id"]
         st.session_state.provider_usage[pid] = st.session_state.provider_usage.get(pid, 0) + 1
 
-        # Track daily usage
         today = datetime.now().strftime("%Y-%m-%d")
         st.session_state.daily_usage[today] = st.session_state.daily_usage.get(today, 0) + 1
 
@@ -1071,6 +1058,32 @@ with tab_chat:
             st.session_state.analytics.append(analysis)
             st.session_state.total_tokens += tokens
 
+            # Track both models in compare mode
+            for (prov_name, mod_name, resp_text, rt_val) in [
+                (provider, model_sel, resp_a, rt_a),
+                (provider_b, model_sel_b, resp_b, rt_b),
+            ]:
+                pd_tmp = PROVIDERS[prov_name]
+                mkey = f"{pd_tmp['id']}::{mod_name}"
+                if mkey not in st.session_state.model_stats:
+                    st.session_state.model_stats[mkey] = {
+                        "provider": pd_tmp["id"], "model": mod_name,
+                        "provider_label": prov_name.split("(")[0].strip(),
+                        "color": pd_tmp["color"],
+                        "calls": 0, "total_tokens": 0, "total_rt": 0.0,
+                        "total_chars": 0, "sentiments": [],
+                        "response_times": [], "token_list": [],
+                    }
+                ms = st.session_state.model_stats[mkey]
+                toks_tmp = count_tokens_approx(resp_text)
+                ms["calls"]        += 1
+                ms["total_tokens"] += toks_tmp
+                ms["total_rt"]     += rt_val
+                ms["total_chars"]  += len(resp_text)
+                ms["sentiments"].append(sentiment_score(resp_text)[0])
+                ms["response_times"].append(rt_val)
+                ms["token_list"].append(toks_tmp)
+
         else:
             typing_ph = st.empty()
             typing_ph.markdown(typing_indicator(), unsafe_allow_html=True)
@@ -1094,14 +1107,11 @@ with tab_chat:
                             "chars_per_sec": cps, "thinking": "", "readability": read,
                             "response_length": len(full_response)}
 
-                # Update word frequency
                 for word, freq in keywords:
                     st.session_state.word_freq_all[word] = st.session_state.word_freq_all.get(word, 0) + freq
 
-                # Update mood log
                 st.session_state.mood_log.append({"time": datetime.now().strftime("%H:%M"), "sentiment": sent, "score": sent_score})
 
-                # ── Track per-model stats ──
                 mkey = f"{pdata['id']}::{model_sel}"
                 if mkey not in st.session_state.model_stats:
                     st.session_state.model_stats[mkey] = {
@@ -1159,13 +1169,11 @@ with tab_chat:
 with tab_prompts:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:0.5rem;">💡 PROMPT LIBRARY</div>', unsafe_allow_html=True)
 
-    # Initialize prompt tab session state
     if "prompt_tab_result" not in st.session_state:
         st.session_state.prompt_tab_result = None
     if "prompt_tab_query" not in st.session_state:
         st.session_state.prompt_tab_query = ""
 
-    # ── Mode toggle ──
     prompt_mode = st.radio(
         "Where to send response:",
         ["💬 Chat Only", "📄 Show Here (Prompts Tab)", "📄+💬 Both"],
@@ -1175,11 +1183,9 @@ with tab_prompts:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Left panel: Library, Right panel: Response ──
     col_lib, col_resp = st.columns([1, 1])
 
     with col_lib:
-        # Prompt search
         prompt_search = st.text_input("🔍 Search prompts", placeholder="Search library…", key="prompt_search")
 
         all_prompts_flat = [(cat, p) for cat, prompts in PROMPT_LIBRARY.items() for p in prompts]
@@ -1222,7 +1228,6 @@ with tab_prompts:
 
         st.divider()
 
-        # Favorites section
         st.markdown('<div style="font-size:0.76rem;color:#f7c948;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">⭐ FAVORITES</div>', unsafe_allow_html=True)
         if st.session_state.favorites:
             for i, fav in enumerate(st.session_state.favorites):
@@ -1270,11 +1275,9 @@ with tab_prompts:
                     st.success("Added to favorites!")
                     st.rerun()
 
-    # ── Right panel: Inline AI Response ──
     with col_resp:
         st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">📄 INLINE RESPONSE</div>', unsafe_allow_html=True)
 
-        # Run the prompt if triggered
         if st.session_state.get("_run_prompt_tab") and st.session_state.prompt_tab_query:
             st.session_state._run_prompt_tab = False
             if not active_api_key:
@@ -1307,7 +1310,6 @@ with tab_prompts:
             if "error" in res:
                 st.markdown(f'<div style="background:#120407;border:1px solid #7f1d1d;border-left:3px solid #e63946;border-radius:10px;padding:14px;color:#e63946;font-size:0.82rem;font-family:\'JetBrains Mono\',monospace;">⚠ Error: {res["error"]}</div>', unsafe_allow_html=True)
             else:
-                # Query shown
                 st.markdown(f"""
                 <div style="background:#1d0b0e;border:1px solid #ff8c4222;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
                     <div style="font-size:0.62rem;color:#ff8c42;font-family:'JetBrains Mono',monospace;margin-bottom:4px;">YOUR PROMPT</div>
@@ -1315,7 +1317,6 @@ with tab_prompts:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Stats bar
                 st.markdown(f"""
                 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                     <span style="font-size:0.66rem;padding:3px 10px;border-radius:8px;background:#ff6b3510;color:#ff6b35;border:1px solid #ff6b3522;font-family:'JetBrains Mono',monospace;">⏱ {res['rt']:.1f}s</span>
@@ -1324,7 +1325,6 @@ with tab_prompts:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Response content
                 st.markdown(f"""
                 <div style="background:#0d0406;border:1px solid #2a1015;border-left:3px solid #ff6b35;border-radius:10px;
                     padding:18px;color:#e8d5c8;font-family:'Crimson Pro',serif;font-size:0.97rem;
@@ -1333,16 +1333,9 @@ with tab_prompts:
                 </div>
                 """, unsafe_allow_html=True)
 
-                # Actions
-                col_act1, col_act2 = st.columns(2)
-                with col_act1:
-                    if st.button("💬 Send to Chat", key="pt_to_chat", use_container_width=True):
-                        st.session_state._pending_prompt = res["query"]
-                        st.rerun()
-                with col_act2:
-                    st.download_button("📥 Download", data=f"Prompt: {res['query']}\n\nResponse:\n{res['response']}",
-                        file_name="phoenix_prompt_response.txt", mime="text/plain",
-                        key="pt_download", use_container_width=True)
+                st.download_button("📥 Download Response", data=f"Prompt: {res['query']}\n\nResponse:\n{res['response']}",
+                    file_name="phoenix_prompt_response.txt", mime="text/plain",
+                    key="pt_download", use_container_width=True)
         else:
             st.markdown("""
             <div style="background:#0d0406;border:1px solid #2a1015;border-radius:12px;padding:40px 20px;
@@ -1380,7 +1373,6 @@ with tab_analytics:
         pos        = sentiments.count("positive")
         total_resp_chars = sum(a.get("response_length", len(ai_msgs[i]["content"])) for i, a in enumerate(valid_a) if i < len(ai_msgs))
 
-        # ── Metrics row ──
         m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Exchanges", len(ai_msgs))
         m2.metric("Avg Length", f"{avg_len} ch")
@@ -1391,7 +1383,6 @@ with tab_analytics:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Row 1: Sentiment Pie + Intent Bar ──
         c1, c2 = st.columns(2)
         with c1:
             if sentiments:
@@ -1433,7 +1424,6 @@ with tab_analytics:
                 )
                 st.plotly_chart(fig2, use_container_width=True)
 
-        # ── Row 2: Response length line + RT scatter ──
         if len(ai_msgs) > 1:
             lengths  = [len(m["content"]) for m in ai_msgs]
             rt_times = [a.get("response_time", 0) for a in valid_a]
@@ -1472,7 +1462,6 @@ with tab_analytics:
             )
             st.plotly_chart(fig3, use_container_width=True)
 
-        # ── Row 3: Radar + Tokens bar ──
         c3, c4 = st.columns(2)
         with c3:
             if valid_a:
@@ -1538,7 +1527,6 @@ with tab_analytics:
                 )
                 st.plotly_chart(fig_t, use_container_width=True)
 
-        # ── Recent Exchanges Table ──
         st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">RECENT EXCHANGES</div>', unsafe_allow_html=True)
         rows = []
         for i, a in enumerate(reversed(valid_a[-10:])):
@@ -1563,7 +1551,6 @@ with tab_nlp:
 
     nlp_subtab_local, nlp_subtab_ai = st.tabs(["📊 Local Text Analysis", "🧠 AI Deep Research Report"])
 
-    # ── SUB-TAB A: Local NLP Analysis ──────────────────────────────
     with nlp_subtab_local:
         nlp_text = st.text_area("Enter text to analyze",
             placeholder="Paste any text here for real-time NLP analysis…",
@@ -1643,7 +1630,6 @@ with tab_nlp:
                     height=220, margin=dict(t=40,b=10,l=30,r=30))
                 st.plotly_chart(gauge, use_container_width=True)
 
-            # Keyword frequency bar chart
             if keywords:
                 st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:10px 0 8px;font-family:\'JetBrains Mono\',monospace;">📈 KEYWORD FREQUENCY CHART</div>', unsafe_allow_html=True)
                 kw_words = [k[0] for k in keywords]
@@ -1678,13 +1664,13 @@ with tab_nlp:
     with nlp_subtab_ai:
         st.markdown("""
         <div style="background:#0d0406;border:1px solid #ff6b3522;border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:0.82rem;color:#c8917a;font-family:'Crimson Pro',serif;line-height:1.7;">
-            🧠 <strong style="color:#ff6b35;">AI Deep Research Report</strong> — Enter any topic, question, or scenario and the AI will generate a comprehensive, structured research report with sections on overview, key concepts, analysis, use cases, pros/cons, and recommendations.
+            🧠 <strong style="color:#ff6b35;">AI Deep Research Report</strong> — Enter any topic, question, or scenario and the AI will generate a comprehensive, structured research report displayed right here in this tab.
         </div>
         """, unsafe_allow_html=True)
 
         research_query = st.text_area(
             "Research Topic / Question / Situation",
-            placeholder="e.g. 'Explain transformer attention mechanisms in LLMs'\nor 'Analyze the pros and cons of microservices vs monolith'\nor 'Research report on climate change impact on agriculture'\nor 'What caused the 2008 financial crisis?'",
+            placeholder="e.g. 'Explain transformer attention mechanisms in LLMs'\nor 'Analyze the pros and cons of microservices vs monolith'\nor 'Research report on climate change impact on agriculture'",
             height=110,
             key="research_query_input"
         )
@@ -1782,32 +1768,100 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                         st.session_state.research_reports.append(rpt_obj)
                         st.session_state.last_report = rpt_obj
 
-                        # Display report header
+                        # ── INLINE REPORT SUMMARY (replaces broken button) ──
+                        rpt_words = report_response.split()
+                        rpt_sentences = re.split(r'[.!?]+', report_response)
+                        rpt_sent_score, rpt_s_val = sentiment_score(report_response)
+                        rpt_keywords = extract_keywords(report_response, top_n=6)
+                        rpt_read = readability_score(report_response)
+
+                        # Extract executive summary (text after "Executive Summary" header)
+                        exec_match = re.search(r'Executive Summary[^\n]*\n+([\s\S]*?)(?=##|$)', report_response, re.IGNORECASE)
+                        exec_summary = exec_match.group(1).strip()[:500] if exec_match else " ".join(rpt_words[:80]) + "…"
+
+                        # Extract key takeaways
+                        key_match = re.search(r'Key Takeaways[^\n]*\n+([\s\S]*?)(?=##|$)', report_response, re.IGNORECASE)
+                        key_takeaways_raw = key_match.group(1).strip() if key_match else ""
+
+                        # ── SUMMARY CARD ──
                         st.markdown(f"""
                         <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid #ff6b3540;
-                            border-radius:16px;padding:6px 20px 4px;margin:12px 0 0;position:relative;">
-                            <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                                background:linear-gradient(90deg,transparent,#ff6b35,#f7c948,#c084fc,transparent);"></div>
-                            <div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 0;font-family:'JetBrains Mono',monospace;font-size:0.68rem;">
-                                <span style="color:#52b788;">✅ Report Generated</span>
-                                <span style="color:#ff6b35;">⏱ {rt_report}s</span>
-                                <span style="color:#f7c948;">⚡ ~{count_tokens_approx(report_response):,} tokens</span>
-                                <span style="color:#c084fc;">📖 {len(report_response.split())} words</span>
-                                <span style="color:#74c0fc;">🤖 {model_sel}</span>
+                            border-radius:16px;padding:0;margin:14px 0;position:relative;overflow:hidden;">
+                            <div style="height:3px;background:linear-gradient(90deg,#e63946,#ff6b35,#f7c948,#52b788,#74c0fc,#c084fc);"></div>
+                            <div style="padding:18px 22px 14px;">
+                                <div style="font-family:'Cinzel',serif;font-size:1rem;color:#ff6b35;font-weight:700;margin-bottom:4px;">
+                                    📋 Report Summary
+                                </div>
+                                <div style="font-size:0.68rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;margin-bottom:12px;">
+                                    {research_query[:80]}{"…" if len(research_query)>80 else ""}
+                                </div>
+
+                                <!-- Stat pills -->
+                                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+                                    <span style="font-size:0.65rem;padding:3px 10px;border-radius:20px;background:#ff6b3510;color:#ff6b35;border:1px solid #ff6b3522;font-family:'JetBrains Mono',monospace;">⏱ {rt_report:.1f}s</span>
+                                    <span style="font-size:0.65rem;padding:3px 10px;border-radius:20px;background:#f7c94810;color:#f7c948;border:1px solid #f7c94822;font-family:'JetBrains Mono',monospace;">⚡ ~{count_tokens_approx(report_response):,} tokens</span>
+                                    <span style="font-size:0.65rem;padding:3px 10px;border-radius:20px;background:#52b78810;color:#52b788;border:1px solid #52b78822;font-family:'JetBrains Mono',monospace;">📖 {len(rpt_words)} words</span>
+                                    <span style="font-size:0.65rem;padding:3px 10px;border-radius:20px;background:#c084fc10;color:#c084fc;border:1px solid #c084fc22;font-family:'JetBrains Mono',monospace;">🤖 {model_sel}</span>
+                                    <span style="font-size:0.65rem;padding:3px 10px;border-radius:20px;background:#74c0fc10;color:#74c0fc;border:1px solid #74c0fc22;font-family:'JetBrains Mono',monospace;">📝 {rpt_read}</span>
+                                    <span style="font-size:0.65rem;padding:3px 10px;border-radius:20px;background:#ff8c4210;color:#ff8c42;border:1px solid #ff8c4222;font-family:'JetBrains Mono',monospace;">💡 {report_depth.split("(")[0].strip()}</span>
+                                </div>
+
+                                <!-- Executive Summary -->
+                                <div style="background:#1d0b0e;border:1px solid #ff6b3520;border-left:3px solid #ff6b35;border-radius:10px;padding:14px;margin-bottom:12px;">
+                                    <div style="font-size:0.62rem;color:#ff6b35;font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">📋 EXECUTIVE SUMMARY</div>
+                                    <div style="color:#e8d5c8;font-family:'Crimson Pro',serif;font-size:0.95rem;line-height:1.75;">{exec_summary}</div>
+                                </div>
+
+                                <!-- Keywords -->
+                                <div style="margin-bottom:12px;">
+                                    <div style="font-size:0.62rem;color:#f7c948;font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">🔑 KEY CONCEPTS</div>
+                                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                        {"".join(f'<span style="font-size:0.72rem;padding:3px 10px;border-radius:20px;background:#f7c94810;color:#f7c948;border:1px solid #f7c94822;font-family:JetBrains Mono,monospace;">{kw}</span>' for kw, _ in rpt_keywords)}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
 
-                        # Render formatted report
+                        # ── NLP Analysis of the report ──
+                        col_nlp1, col_nlp2, col_nlp3 = st.columns(3)
+                        with col_nlp1:
+                            sc_rpt = {"positive":"#52b788","negative":"#e63946","neutral":"#c8917a"}.get(rpt_sent_score,"#c8917a")
+                            st.markdown(f"""
+                            <div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:14px;text-align:center;">
+                                <div style="font-size:0.62rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">REPORT TONE</div>
+                                <div style="font-family:'Cinzel',serif;font-size:1.4rem;color:{sc_rpt};font-weight:700;">{rpt_sent_score.title()}</div>
+                                <div style="font-size:0.72rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">{rpt_s_val:.0%} confidence</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with col_nlp2:
+                            st.markdown(f"""
+                            <div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:14px;text-align:center;">
+                                <div style="font-size:0.62rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">READABILITY</div>
+                                <div style="font-family:'Cinzel',serif;font-size:1.4rem;color:#74c0fc;font-weight:700;">{rpt_read}</div>
+                                <div style="font-size:0.72rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">{len(rpt_sentences)} sentences</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with col_nlp3:
+                            avg_wl_rpt = sum(len(w) for w in rpt_words) / max(1, len(rpt_words))
+                            st.markdown(f"""
+                            <div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:14px;text-align:center;">
+                                <div style="font-size:0.62rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">DEPTH SCORE</div>
+                                <div style="font-family:'Cinzel',serif;font-size:1.4rem;color:#ff8c42;font-weight:700;">{min(100,int(len(rpt_words)/15))}%</div>
+                                <div style="font-size:0.72rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">avg {avg_wl_rpt:.1f} chars/word</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        # ── Full report ──
+                        st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 6px;font-family:\'JetBrains Mono\',monospace;">📄 FULL REPORT</div>', unsafe_allow_html=True)
                         st.markdown(f"""
-                        <div style="background:#0d0406;border:1px solid #2a1015;border-radius:0 0 16px 16px;
+                        <div style="background:#0d0406;border:1px solid #2a1015;border-radius:0 0 14px 14px;
                             padding:24px;font-family:'Crimson Pro',serif;font-size:1rem;color:#e8d5c8;line-height:1.85;
-                            max-height:75vh;overflow-y:auto;">
+                            max-height:70vh;overflow-y:auto;">
                             {format_content(report_response)}
                         </div>
                         """, unsafe_allow_html=True)
 
-                        # Export report
                         st.download_button(
                             "📥 Download Report as .txt",
                             data=f"PHOENIX AI RESEARCH REPORT\n{'='*50}\nTopic: {research_query}\nModel: {model_sel}\nDepth: {report_depth}\nStyle: {report_style}\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\nTime: {rt_report}s\n{'='*50}\n\n{report_response}",
@@ -1818,7 +1872,7 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
 
                     except Exception as e:
                         st.error(f"⚠ Report generation failed: {str(e)}")
-                        st.markdown(f'<div style="background:#120407;border:1px solid #7f1d1d;border-left:3px solid #e63946;border-radius:10px;padding:14px;color:#e63946;font-size:0.82rem;font-family:\'JetBrains Mono\',monospace;">Error details: {str(e)}<br><br>Tips: Make sure your API key is correct and you have selected the right provider in the sidebar.</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="background:#120407;border:1px solid #7f1d1d;border-left:3px solid #e63946;border-radius:10px;padding:14px;color:#e63946;font-size:0.82rem;font-family:\'JetBrains Mono\',monospace;">Error: {str(e)}<br><br>Tips: Check your API key and provider selection.</div>', unsafe_allow_html=True)
 
         # Previous reports
         if "research_reports" in st.session_state and st.session_state.research_reports:
@@ -1852,7 +1906,6 @@ with tab_deepstats:
     if not valid_a:
         st.markdown('<div style="text-align:center;padding:3rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;"><div style="font-size:3rem;margin-bottom:1rem;display:inline-block;">📈</div><div>Chat to generate deep statistics</div></div>', unsafe_allow_html=True)
     else:
-        # ── Provider Usage Pie ──
         c1, c2 = st.columns(2)
         with c1:
             if st.session_state.provider_usage:
@@ -1873,7 +1926,6 @@ with tab_deepstats:
             else:
                 st.info("No provider usage data yet.")
 
-        # ── Sentiment Timeline ──
         with c2:
             if st.session_state.mood_log:
                 ml = st.session_state.mood_log
@@ -1900,7 +1952,6 @@ with tab_deepstats:
                 )
                 st.plotly_chart(fig_ml, use_container_width=True)
 
-        # ── Word Cloud style (top words bar) ──
         if st.session_state.word_freq_all:
             st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:10px 0 8px;font-family:\'JetBrains Mono\',monospace;">🌐 GLOBAL WORD FREQUENCY (ALL CONVERSATIONS)</div>', unsafe_allow_html=True)
             top_words = sorted(st.session_state.word_freq_all.items(), key=lambda x: x[1], reverse=True)[:20]
@@ -1923,7 +1974,6 @@ with tab_deepstats:
             )
             st.plotly_chart(fig_wf, use_container_width=True)
 
-        # ── Response Speed Distribution (Histogram) ──
         c3, c4 = st.columns(2)
         with c3:
             rt_all = [a.get("response_time", 0) for a in valid_a if a.get("response_time", 0) > 0]
@@ -1943,7 +1993,6 @@ with tab_deepstats:
                 )
                 st.plotly_chart(fig_hist, use_container_width=True)
 
-        # ── Speed vs Length Scatter ──
         with c4:
             if len(valid_a) > 1:
                 lens = [a.get("response_length", 500) for a in valid_a]
@@ -1968,7 +2017,6 @@ with tab_deepstats:
                 )
                 st.plotly_chart(fig_sc, use_container_width=True)
 
-        # ── Readability distribution ──
         readabilities = [a.get("readability","Medium") for a in valid_a if a.get("readability")]
         if readabilities:
             rc = Counter(readabilities)
@@ -1998,7 +2046,6 @@ with tab_notes:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">🗒️ SESSION NOTES</div>', unsafe_allow_html=True)
     st.markdown('<div style="font-size:0.78rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:10px;">Save important snippets, ideas, or responses from your chat session</div>', unsafe_allow_html=True)
 
-    # Add note
     with st.expander("➕ Add New Note", expanded=not st.session_state.notes):
         note_title = st.text_input("Title", placeholder="Note title…", key="note_title")
         note_content = st.text_area("Content", placeholder="Write your note…", height=100, key="note_content")
@@ -2014,9 +2061,7 @@ with tab_notes:
                 st.success("Note saved!")
                 st.rerun()
 
-    # Display notes
     if st.session_state.notes:
-        # Filter by tag
         all_tags = list(set(n["tag"] for n in st.session_state.notes))
         tag_filter = st.selectbox("Filter by tag", ["All"] + all_tags, key="notes_tag_filter")
         filtered_notes = st.session_state.notes if tag_filter == "All" else [n for n in st.session_state.notes if n["tag"] == tag_filter]
@@ -2034,7 +2079,6 @@ with tab_notes:
                         st.session_state.notes.pop(real_idx)
                         st.rerun()
 
-        # Export notes
         st.divider()
         if st.button("📤 Export All Notes as JSON", use_container_width=True):
             export_notes = json.dumps({"notes": st.session_state.notes, "exported_at": datetime.now().isoformat()}, indent=2)
@@ -2093,7 +2137,6 @@ with tab_bench:
                     }
                     st.session_state.benchmarks.append(bench_entry)
 
-                    # Show result
                     st.markdown(f"""
                     <div style="background:#0d0406;border:1px solid #52b78840;border-left:3px solid #52b788;border-radius:10px;padding:16px;margin:10px 0;">
                         <div style="display:flex;gap:20px;margin-bottom:10px;flex-wrap:wrap;">
@@ -2109,7 +2152,6 @@ with tab_bench:
                 except Exception as e:
                     st.error(f"Benchmark failed: {e}")
 
-    # Benchmark history
     if st.session_state.benchmarks:
         st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 8px;font-family:\'JetBrains Mono\',monospace;">📋 BENCHMARK HISTORY</div>', unsafe_allow_html=True)
         bench_df = pd.DataFrame([{
@@ -2118,7 +2160,6 @@ with tab_bench:
         } for b in st.session_state.benchmarks])
         st.dataframe(bench_df, use_container_width=True, hide_index=True)
 
-        # Benchmark comparison chart
         if len(st.session_state.benchmarks) > 1:
             fig_bench = go.Figure()
             tasks_bench = list(set(b["task"] for b in st.session_state.benchmarks))
@@ -2153,7 +2194,6 @@ with tab_flash:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:0.3rem;">🎯 AI FLASHCARD GENERATOR</div>', unsafe_allow_html=True)
     st.markdown('<div style="font-size:0.78rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:12px;">Generate stunning AI-powered flashcards · track your study progress · explore with charts</div>', unsafe_allow_html=True)
 
-    # ── Generator controls ──
     col_fc1, col_fc2, col_fc3 = st.columns([2, 2, 2])
     with col_fc1:
         flash_category = st.selectbox("Category", list(FLASHCARD_TOPICS.keys()), key="flash_cat")
@@ -2164,7 +2204,6 @@ with tab_flash:
 
     final_topic = custom_flash.strip() if custom_flash.strip() else flash_topic
 
-    # ── store last flashcard in session so button works AFTER rerun ──
     if "last_flashcard" not in st.session_state:
         st.session_state.last_flashcard = None
 
@@ -2191,7 +2230,6 @@ CATEGORY: [{flash_category}]"""
                         0.5, 900, active_api_key
                     )
 
-                    # ── Robust multi-line parser ──
                     parsed = {}
                     current_key = None
                     for line in response.strip().split('\n'):
@@ -2212,9 +2250,6 @@ CATEGORY: [{flash_category}]"""
                     difficulty = parsed.get("difficulty", "Medium").strip()
                     category   = parsed.get("category",  flash_category)
 
-                    diff_color = {"Easy": "#52b788", "Medium": "#f7c948", "Hard": "#e63946"}.get(difficulty, "#c8917a")
-
-                    # ── Save to history ──
                     fc_entry = {
                         "topic":      final_topic,
                         "category":   flash_category,
@@ -2240,7 +2275,6 @@ CATEGORY: [{flash_category}]"""
                     st.error(f"⚠ Flashcard generation failed: {str(e)}")
                     st.session_state.last_flashcard = None
 
-    # ── Render the last generated flashcard as a beautiful card ──
     fc = st.session_state.last_flashcard
     if fc:
         diff_color = {"Easy": "#52b788", "Medium": "#f7c948", "Hard": "#e63946"}.get(fc.get("difficulty","Medium"), "#c8917a")
@@ -2258,10 +2292,7 @@ CATEGORY: [{flash_category}]"""
             overflow: hidden;
             box-shadow: 0 8px 40px rgba(255,107,53,0.12), 0 2px 8px rgba(0,0,0,0.4);
         ">
-            <!-- Top gradient bar -->
             <div style="height:4px;background:linear-gradient(90deg,#e63946,#ff6b35,#f7c948,#52b788,#74c0fc,#c084fc);border-radius:20px 20px 0 0;"></div>
-
-            <!-- Header strip -->
             <div style="
                 padding: 16px 24px 12px;
                 display: flex;
@@ -2283,84 +2314,30 @@ CATEGORY: [{flash_category}]"""
                     <span style="font-size:0.65rem;padding:4px 10px;border-radius:20px;background:#2a1015;color:#4a2a22;font-family:'JetBrains Mono',monospace;">{fc["timestamp"]}</span>
                 </div>
             </div>
-
-            <!-- Body -->
             <div style="padding:20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-
-                <!-- FRONT -->
-                <div style="
-                    background:linear-gradient(135deg,#1d0b0e,#120608);
-                    border:1px solid #ff6b3530;
-                    border-top:3px solid #ff6b35;
-                    border-radius:14px;
-                    padding:18px;
-                    position:relative;
-                ">
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#ff6b35;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff6b35;box-shadow:0 0 6px #ff6b35;"></span>
-                        QUESTION
-                    </div>
+                <div style="background:linear-gradient(135deg,#1d0b0e,#120608);border:1px solid #ff6b3530;border-top:3px solid #ff6b35;border-radius:14px;padding:18px;position:relative;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#ff6b35;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff6b35;box-shadow:0 0 6px #ff6b35;"></span>QUESTION</div>
                     <div style="font-family:'Crimson Pro',serif;font-size:1.1rem;color:#fdf0e8;line-height:1.65;font-weight:600;">{fc["front"]}</div>
                 </div>
-
-                <!-- BACK -->
-                <div style="
-                    background:linear-gradient(135deg,#051a10,#060e08);
-                    border:1px solid #52b78830;
-                    border-top:3px solid #52b788;
-                    border-radius:14px;
-                    padding:18px;
-                ">
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#52b788;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#52b788;box-shadow:0 0 6px #52b788;"></span>
-                        ANSWER
-                    </div>
+                <div style="background:linear-gradient(135deg,#051a10,#060e08);border:1px solid #52b78830;border-top:3px solid #52b788;border-radius:14px;padding:18px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#52b788;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#52b788;box-shadow:0 0 6px #52b788;"></span>ANSWER</div>
                     <div style="font-family:'Crimson Pro',serif;font-size:0.97rem;color:#d4f0e4;line-height:1.75;">{fc["back"]}</div>
                 </div>
-
             </div>
-
-            <!-- Example + Key Point row -->
             <div style="padding:0 24px 20px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-
-                <!-- EXAMPLE -->
-                <div style="
-                    background:linear-gradient(135deg,#07111a,#050d14);
-                    border:1px solid #74c0fc30;
-                    border-top:3px solid #74c0fc;
-                    border-radius:14px;
-                    padding:16px;
-                ">
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#74c0fc;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#74c0fc;box-shadow:0 0 6px #74c0fc;"></span>
-                        EXAMPLE
-                    </div>
+                <div style="background:linear-gradient(135deg,#07111a,#050d14);border:1px solid #74c0fc30;border-top:3px solid #74c0fc;border-radius:14px;padding:16px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#74c0fc;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#74c0fc;box-shadow:0 0 6px #74c0fc;"></span>EXAMPLE</div>
                     <div style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:#bde0f5;line-height:1.65;white-space:pre-wrap;">{fc.get("example","No example provided.") or "No example provided."}</div>
                 </div>
-
-                <!-- KEY POINT -->
-                <div style="
-                    background:linear-gradient(135deg,#1a1205,#120e04);
-                    border:1px solid #f7c94830;
-                    border-top:3px solid #f7c948;
-                    border-radius:14px;
-                    padding:16px;
-                ">
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#f7c948;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
-                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f7c948;box-shadow:0 0 6px #f7c948;"></span>
-                        ⭐ KEY POINT
-                    </div>
+                <div style="background:linear-gradient(135deg,#1a1205,#120e04);border:1px solid #f7c94830;border-top:3px solid #f7c948;border-radius:14px;padding:16px;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#f7c948;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f7c948;box-shadow:0 0 6px #f7c948;"></span>⭐ KEY POINT</div>
                     <div style="font-family:'Crimson Pro',serif;font-size:1rem;color:#fdf0c8;line-height:1.65;font-weight:600;font-style:italic;">{fc.get("key_point","Remember the core concept!") or "Remember the core concept!"}</div>
                 </div>
-
             </div>
-
-            <!-- Bottom bar -->
             <div style="height:2px;background:linear-gradient(90deg,transparent,#ff6b3530,transparent);"></div>
         </div>
         """, unsafe_allow_html=True)
 
-        # ── Action buttons OUTSIDE the spinner, so they work ──
         col_a1, col_a2, col_a3 = st.columns(3)
         with col_a1:
             if st.button(f"💬 Ask Phoenix: Explain '{fc['topic']}' deeper", use_container_width=True, key="flash_explain_btn"):
@@ -2372,8 +2349,6 @@ CATEGORY: [{flash_category}]"""
                 st.rerun()
         with col_a2:
             if st.button("🔄 Generate Another on Same Topic", use_container_width=True, key="flash_again_btn"):
-                st.session_state._pending_prompt = None
-                # Re-trigger by clearing last card and rerunning
                 st.session_state.last_flashcard = None
                 st.rerun()
         with col_a3:
@@ -2387,13 +2362,11 @@ CATEGORY: [{flash_category}]"""
                 })
                 st.success("✅ Saved to Notes tab!")
 
-    # ── STUDY TRACKER & CHARTS ────────────────────────────────────
     st.divider()
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:0.85rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">📊 STUDY TRACKER & ANALYTICS</div>', unsafe_allow_html=True)
 
     fh = st.session_state.flashcard_history
 
-    # ── Metrics row ──
     dur_mins = (datetime.now() - datetime.fromisoformat(st.session_state.session_start)).seconds // 60
     unique_topics    = list(set(f["topic"] for f in fh))
     unique_cats      = list(set(f["category"] for f in fh))
@@ -2416,7 +2389,6 @@ CATEGORY: [{flash_category}]"""
         </div>
         """, unsafe_allow_html=True)
     else:
-        # ── ROW 1: Category bar + Difficulty pie ──
         ch1, ch2 = st.columns(2)
 
         with ch1:
@@ -2425,11 +2397,7 @@ CATEGORY: [{flash_category}]"""
             fig_cat = go.Figure(go.Bar(
                 x=list(cat_counts.keys()),
                 y=list(cat_counts.values()),
-                marker=dict(
-                    color=cat_colors[:len(cat_counts)],
-                    line=dict(color='rgba(0,0,0,0)'),
-                    opacity=0.9,
-                ),
+                marker=dict(color=cat_colors[:len(cat_counts)], line=dict(color='rgba(0,0,0,0)'), opacity=0.9),
                 text=list(cat_counts.values()),
                 textposition='outside',
                 textfont=dict(color='#fdf0e8', size=12, family="Cinzel"),
@@ -2462,20 +2430,14 @@ CATEGORY: [{flash_category}]"""
                 paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#c8917a"),
                 legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
                 margin=dict(t=50, b=20, l=20, r=20), height=300,
-                annotations=[dict(
-                    text=f"<b>{total_cards}</b><br><span style='font-size:10px'>total</span>",
-                    x=0.5, y=0.5, font_size=16, showarrow=False,
-                    font=dict(color="#ff6b35", family="Cinzel")
-                )]
+                annotations=[dict(text=f"<b>{total_cards}</b><br>total", x=0.5, y=0.5,
+                    font_size=16, showarrow=False, font=dict(color="#ff6b35", family="Cinzel"))]
             )
             st.plotly_chart(fig_diff, use_container_width=True)
 
-        # ── ROW 2: Timeline + Topic treemap-style bar ──
         ch3, ch4 = st.columns(2)
 
         with ch3:
-            # Cards generated over time
-            times = [f["timestamp"] for f in fh]
             fig_time = go.Figure()
             fig_time.add_trace(go.Scatter(
                 x=list(range(1, len(fh)+1)),
@@ -2505,23 +2467,15 @@ CATEGORY: [{flash_category}]"""
             st.plotly_chart(fig_time, use_container_width=True)
 
         with ch4:
-            # Topics horizontal bar
             topic_counts = Counter(f["topic"] for f in fh)
             top_topics   = topic_counts.most_common(8)
             t_names      = [t[0][:25] for t in top_topics]
             t_vals       = [t[1] for t in top_topics]
             t_colors     = ["#ff6b35","#f7c948","#52b788","#74c0fc","#c084fc","#ff8c42","#e63946","#67e8f9"]
             fig_top = go.Figure(go.Bar(
-                x=t_vals,
-                y=t_names,
-                orientation='h',
-                marker=dict(
-                    color=t_colors[:len(t_names)],
-                    line=dict(color='rgba(0,0,0,0)'),
-                    opacity=0.9,
-                ),
-                text=t_vals,
-                textposition='outside',
+                x=t_vals, y=t_names, orientation='h',
+                marker=dict(color=t_colors[:len(t_names)], line=dict(color='rgba(0,0,0,0)'), opacity=0.9),
+                text=t_vals, textposition='outside',
                 textfont=dict(color='#fdf0e8', size=11),
             ))
             fig_top.update_layout(
@@ -2534,23 +2488,18 @@ CATEGORY: [{flash_category}]"""
             )
             st.plotly_chart(fig_top, use_container_width=True)
 
-        # ── ROW 3: Difficulty over time stacked + radar ──
         ch5, ch6 = st.columns(2)
 
         with ch5:
-            # Difficulty over time — stacked area
             easy_running   = [1 if f.get("difficulty")=="Easy" else 0 for f in fh]
             medium_running = [1 if f.get("difficulty")=="Medium" else 0 for f in fh]
             hard_running   = [1 if f.get("difficulty")=="Hard" else 0 for f in fh]
             x_idx = list(range(1, len(fh)+1))
 
             fig_stack = go.Figure()
-            fig_stack.add_trace(go.Bar(x=x_idx, y=easy_running, name="Easy",
-                marker_color="#52b788", opacity=0.85))
-            fig_stack.add_trace(go.Bar(x=x_idx, y=medium_running, name="Medium",
-                marker_color="#f7c948", opacity=0.85))
-            fig_stack.add_trace(go.Bar(x=x_idx, y=hard_running, name="Hard",
-                marker_color="#e63946", opacity=0.85))
+            fig_stack.add_trace(go.Bar(x=x_idx, y=easy_running, name="Easy", marker_color="#52b788", opacity=0.85))
+            fig_stack.add_trace(go.Bar(x=x_idx, y=medium_running, name="Medium", marker_color="#f7c948", opacity=0.85))
+            fig_stack.add_trace(go.Bar(x=x_idx, y=hard_running, name="Hard", marker_color="#e63946", opacity=0.85))
             fig_stack.update_layout(
                 title=dict(text="🎲 Difficulty per Card", font=dict(color="#ff6b35", size=13, family="Cinzel")),
                 barmode='stack',
@@ -2564,7 +2513,6 @@ CATEGORY: [{flash_category}]"""
             st.plotly_chart(fig_stack, use_container_width=True)
 
         with ch6:
-            # Study readiness radar
             total = max(1, len(fh))
             categories_rad = list(FLASHCARD_TOPICS.keys())
             cat_vals_rad   = [Counter(f["category"] for f in fh).get(c, 0) / total * 100 for c in categories_rad]
@@ -2592,7 +2540,6 @@ CATEGORY: [{flash_category}]"""
             )
             st.plotly_chart(fig_rad, use_container_width=True)
 
-        # ── History table ──
         st.markdown('<div style="font-size:0.72rem;color:#c8917a;margin:10px 0 6px;font-family:\'JetBrains Mono\',monospace;">📋 FLASHCARD HISTORY</div>', unsafe_allow_html=True)
         hist_rows = [{"#": i+1, "Time": f["timestamp"], "Topic": f["topic"],
                       "Category": f["category"], "Difficulty": f.get("difficulty","—")}
@@ -2611,7 +2558,6 @@ with tab_health:
     session_dur_sec = (datetime.now() - datetime.fromisoformat(st.session_state.session_start)).seconds
     msg_count = len(st.session_state.messages)
 
-    # Health scores
     token_usage_pct  = min(100, (st.session_state.total_tokens / 50000) * 100)
     activity_score   = min(100, (msg_count / 50) * 100)
     positivity_score = (sum(1 for a in valid_a if a.get("sentiment") == "positive") / max(1, len(valid_a))) * 100
@@ -2619,7 +2565,6 @@ with tab_health:
     overall_health   = (100 - token_usage_pct * 0.3 + positivity_score * 0.4 + speed_score * 0.3)
     overall_health   = max(0, min(100, overall_health))
 
-    # Big health meter
     health_color = "#52b788" if overall_health > 70 else "#f7c948" if overall_health > 40 else "#e63946"
     fig_health = go.Figure(go.Indicator(
         mode="gauge+number+delta",
@@ -2653,25 +2598,14 @@ with tab_health:
         st.markdown(f"""
         <div style="background:#0d0406;border:1px solid #2a1015;border-radius:12px;padding:18px;margin-top:20px;font-family:'JetBrains Mono',monospace;font-size:0.76rem;color:#c8917a;">
             <div style="color:#ff6b35;font-family:'Cinzel',serif;font-size:0.85rem;margin-bottom:12px;">Session Details</div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                <span>Duration</span><span style="color:#f7c948;">{dur_str}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                <span>Messages</span><span style="color:#ff6b35;">{msg_count}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                <span>Tokens Used</span><span style="color:#c084fc;">~{st.session_state.total_tokens:,}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                <span>Notes Saved</span><span style="color:#67e8f9;">{len(st.session_state.notes)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;">
-                <span>Provider</span><span style="color:{pcolor};">{pdata['id'].upper()}</span>
-            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Duration</span><span style="color:#f7c948;">{dur_str}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Messages</span><span style="color:#ff6b35;">{msg_count}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Tokens Used</span><span style="color:#c084fc;">~{st.session_state.total_tokens:,}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Notes Saved</span><span style="color:#67e8f9;">{len(st.session_state.notes)}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span>Provider</span><span style="color:{pcolor};">{pdata['id'].upper()}</span></div>
         </div>
         """, unsafe_allow_html=True)
 
-    # ── Health breakdown bars ──
     st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 10px;font-family:\'JetBrains Mono\',monospace;">📊 HEALTH BREAKDOWN</div>', unsafe_allow_html=True)
 
     health_metrics = [
@@ -2693,7 +2627,6 @@ with tab_health:
         </div>
         """, unsafe_allow_html=True)
 
-    # ── Mood timeline ──
     if st.session_state.mood_log:
         st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 8px;font-family:\'JetBrains Mono\',monospace;">😊 CONVERSATION MOOD FLOW</div>', unsafe_allow_html=True)
         ml = st.session_state.mood_log
@@ -2703,14 +2636,10 @@ with tab_health:
         colors_mood = ["#52b788" if v > 0 else "#e63946" if v < 0 else "#c8917a" for v in y_mood]
 
         fig_mood = go.Figure()
-        fig_mood.add_trace(go.Bar(
-            x=x_mood, y=y_mood, name="Mood",
-            marker=dict(color=colors_mood, line=dict(color='rgba(0,0,0,0)')),
-        ))
-        fig_mood.add_trace(go.Scatter(
-            x=x_mood, y=y_mood, mode='lines', name="Trend",
-            line=dict(color='#f7c948', width=2, dash='dot'),
-        ))
+        fig_mood.add_trace(go.Bar(x=x_mood, y=y_mood, name="Mood",
+            marker=dict(color=colors_mood, line=dict(color='rgba(0,0,0,0)'))))
+        fig_mood.add_trace(go.Scatter(x=x_mood, y=y_mood, mode='lines', name="Trend",
+            line=dict(color='#f7c948', width=2, dash='dot')))
         fig_mood.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#c8917a"),
@@ -2722,7 +2651,6 @@ with tab_health:
         )
         st.plotly_chart(fig_mood, use_container_width=True)
 
-    # Tips
     st.divider()
     st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">💡 SESSION TIPS</div>', unsafe_allow_html=True)
     tips = []
@@ -2736,7 +2664,470 @@ with tab_health:
 
 
 # ══════════════════════════════════════════════════════════════════
-# TAB 10: SETTINGS
+# TAB 10: MODEL COMPARISONS  ← NEW TAB
+# ══════════════════════════════════════════════════════════════════
+with tab_modelcomp:
+    st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:0.3rem;">🆚 MODEL COMPARISONS & AI ANALYSIS</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.78rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:14px;">Live stats auto-update as you chat across different models · switch models in sidebar to add data</div>', unsafe_allow_html=True)
+
+    ms_data = st.session_state.model_stats
+
+    if not ms_data:
+        st.markdown("""
+        <div style="text-align:center;padding:4rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">
+            <div style="font-size:4rem;margin-bottom:1rem;animation:float 3s ease-in-out infinite;display:inline-block;">🆚</div>
+            <div style="font-size:0.9rem;margin-bottom:8px;">No model data yet</div>
+            <div style="font-size:0.75rem;color:#3a1a18;">Chat with at least one model to see comparison data.<br>Switch between models in the sidebar to compare multiple.</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # ── Build summary table ──
+        model_rows = []
+        for mkey, ms in ms_data.items():
+            calls      = ms["calls"]
+            avg_rt     = ms["total_rt"] / max(1, calls)
+            avg_tokens = ms["total_tokens"] / max(1, calls)
+            avg_chars  = ms["total_chars"] / max(1, calls)
+            avg_cps    = avg_chars / max(0.001, avg_rt)
+            pos_rate   = ms["sentiments"].count("positive") / max(1, len(ms["sentiments"]))
+            min_rt     = min(ms["response_times"]) if ms["response_times"] else 0
+            max_rt     = max(ms["response_times"]) if ms["response_times"] else 0
+            model_rows.append({
+                "mkey": mkey,
+                "provider": ms["provider_label"],
+                "model": ms["model"],
+                "color": ms["color"],
+                "calls": calls,
+                "avg_rt": avg_rt,
+                "avg_tokens": avg_tokens,
+                "avg_chars": avg_chars,
+                "avg_cps": avg_cps,
+                "pos_rate": pos_rate,
+                "min_rt": min_rt,
+                "max_rt": max_rt,
+                "total_tokens": ms["total_tokens"],
+            })
+
+        model_rows.sort(key=lambda x: x["avg_rt"])
+
+        # ── Top-level scorecards ──
+        st.markdown('<div style="font-size:0.72rem;color:#ff6b35;font-family:\'JetBrains Mono\',monospace;letter-spacing:2px;margin-bottom:10px;">🏆 LEADERBOARD</div>', unsafe_allow_html=True)
+
+        leader_cols = st.columns(min(4, len(model_rows)))
+        medals = ["🥇", "🥈", "🥉", "🏅"]
+        for i, row in enumerate(model_rows[:4]):
+            with leader_cols[i]:
+                speed_label = "Fastest" if i == 0 else f"#{i+1} Speed"
+                st.markdown(f"""
+                <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid {row['color']}33;
+                    border-top:3px solid {row['color']};border-radius:12px;padding:14px;text-align:center;margin-bottom:8px;">
+                    <div style="font-size:1.8rem;margin-bottom:4px;">{medals[i]}</div>
+                    <div style="font-family:'Cinzel',serif;font-size:0.7rem;color:{row['color']};letter-spacing:1px;font-weight:700;">{speed_label}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:#c8917a;margin:4px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{row['model']}">{row['model'][:22]}</div>
+                    <div style="font-size:0.65rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">{row['provider'].split()[0]}</div>
+                    <div style="font-family:'Cinzel',serif;font-size:1.3rem;color:{row['color']};font-weight:700;margin-top:6px;">{row['avg_rt']:.2f}s</div>
+                    <div style="font-size:0.62rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">avg response time</div>
+                    <div style="display:flex;justify-content:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                        <span style="font-size:0.6rem;padding:2px 8px;border-radius:10px;background:{row['color']}10;color:{row['color']};border:1px solid {row['color']}22;">{row['calls']} calls</span>
+                        <span style="font-size:0.6rem;padding:2px 8px;border-radius:10px;background:#f7c94810;color:#f7c948;border:1px solid #f7c94822;">{row['avg_cps']:.0f} c/s</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── ROW 1: Response Time Bar + Token Usage Bar ──
+        rc1, rc2 = st.columns(2)
+
+        with rc1:
+            model_names = [r["model"][:25] for r in model_rows]
+            avg_rts     = [r["avg_rt"] for r in model_rows]
+            colors_bar  = [r["color"] for r in model_rows]
+
+            fig_rt = go.Figure(go.Bar(
+                x=avg_rts,
+                y=model_names,
+                orientation='h',
+                marker=dict(
+                    color=colors_bar,
+                    line=dict(color='rgba(0,0,0,0)'),
+                    opacity=0.9,
+                ),
+                text=[f"{v:.2f}s" for v in avg_rts],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_rt.update_layout(
+                title=dict(text="⏱ Avg Response Time (lower = faster)", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="seconds"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=60), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_rt, use_container_width=True)
+
+        with rc2:
+            avg_toks = [r["avg_tokens"] for r in model_rows]
+            fig_tok = go.Figure(go.Bar(
+                x=avg_toks,
+                y=model_names,
+                orientation='h',
+                marker=dict(
+                    color=colors_bar,
+                    line=dict(color='rgba(0,0,0,0)'),
+                    opacity=0.85,
+                ),
+                text=[f"~{int(v)}" for v in avg_toks],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_tok.update_layout(
+                title=dict(text="⚡ Avg Tokens per Response", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="tokens"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=60), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_tok, use_container_width=True)
+
+        # ── ROW 2: Speed (c/s) Bar + Positivity Bar ──
+        rc3, rc4 = st.columns(2)
+
+        with rc3:
+            avg_cps_vals = [r["avg_cps"] for r in model_rows]
+            fig_cps = go.Figure(go.Bar(
+                x=avg_cps_vals,
+                y=model_names,
+                orientation='h',
+                marker=dict(
+                    color=avg_cps_vals,
+                    colorscale=[[0,"#e63946"],[0.4,"#f7c948"],[0.7,"#52b788"],[1,"#67e8f9"]],
+                    showscale=True,
+                    colorbar=dict(tickfont=dict(color="#c8917a"), title=dict(text="c/s", font=dict(color="#c8917a"))),
+                    line=dict(color='rgba(0,0,0,0)'),
+                ),
+                text=[f"{int(v)} c/s" for v in avg_cps_vals],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_cps.update_layout(
+                title=dict(text="🚀 Characters per Second (higher = faster output)", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="chars/sec"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=80), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_cps, use_container_width=True)
+
+        with rc4:
+            pos_rates = [r["pos_rate"] * 100 for r in model_rows]
+            pos_colors_bar = ["#52b788" if v >= 60 else "#f7c948" if v >= 40 else "#e63946" for v in pos_rates]
+            fig_pos = go.Figure(go.Bar(
+                x=pos_rates,
+                y=model_names,
+                orientation='h',
+                marker=dict(color=pos_colors_bar, line=dict(color='rgba(0,0,0,0)'), opacity=0.9),
+                text=[f"{v:.0f}%" for v in pos_rates],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_pos.update_layout(
+                title=dict(text="☀️ Positive Sentiment Rate", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="%", range=[0, 110]),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=60), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_pos, use_container_width=True)
+
+        # ── ROW 3: Multi-metric Radar + Provider Pie ──
+        rc5, rc6 = st.columns(2)
+
+        with rc5:
+            # Radar: normalize each metric 0-100 across models
+            if len(model_rows) >= 1:
+                radar_cats = ["Speed", "Output Volume", "Positivity", "Consistency", "Efficiency"]
+                max_cps    = max(r["avg_cps"] for r in model_rows) or 1
+                max_chars  = max(r["avg_chars"] for r in model_rows) or 1
+                min_rt_all = min(r["avg_rt"] for r in model_rows) or 0.001
+
+                fig_radar = go.Figure()
+                for row in model_rows:
+                    rt_range = (row["max_rt"] - row["min_rt"]) if len(ms_data[row["mkey"]]["response_times"]) > 1 else 0
+                    consistency = max(0, 100 - (rt_range / max(row["avg_rt"], 0.001)) * 100)
+                    vals = [
+                        min(100, (row["avg_cps"] / max_cps) * 100),
+                        min(100, (row["avg_chars"] / max_chars) * 100),
+                        row["pos_rate"] * 100,
+                        consistency,
+                        min(100, (row["avg_tokens"] / max(r["avg_tokens"] for r in model_rows)) * 100),
+                    ]
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=vals + [vals[0]],
+                        theta=radar_cats + [radar_cats[0]],
+                        fill='toself',
+                        fillcolor=f"{row['color']}18",
+                        line=dict(color=row['color'], width=2),
+                        marker=dict(color=row['color'], size=6),
+                        name=row['model'][:20],
+                    ))
+                fig_radar.update_layout(
+                    title=dict(text="🕸️ Multi-Model Radar Comparison", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                    polar=dict(
+                        bgcolor='rgba(0,0,0,0)',
+                        radialaxis=dict(visible=True, range=[0,100], gridcolor='#2a1015', color='#4a2a22',
+                                       tickfont=dict(size=8), ticksuffix="%"),
+                        angularaxis=dict(gridcolor='#2a1015', color='#c8917a', tickfont=dict(size=10)),
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#c8917a'),
+                    legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(t=50, b=20, l=40, r=40), height=360,
+                )
+                st.plotly_chart(fig_radar, use_container_width=True)
+
+        with rc6:
+            # Total tokens per model (pie)
+            tok_labels = [r["model"][:20] for r in model_rows]
+            tok_vals2  = [r["total_tokens"] for r in model_rows]
+            tok_colors2= [r["color"] for r in model_rows]
+            fig_tok_pie = go.Figure(data=[go.Pie(
+                labels=tok_labels, values=tok_vals2, hole=0.55,
+                marker=dict(colors=tok_colors2, line=dict(color='#060203', width=2)),
+                textfont=dict(color='#fdf0e8', size=11),
+            )])
+            fig_tok_pie.update_layout(
+                title=dict(text="🪙 Total Tokens Used per Model", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#c8917a"),
+                legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(t=50, b=20, l=20, r=20), height=360,
+                annotations=[dict(
+                    text=f"<b>{sum(tok_vals2):,}</b><br>total",
+                    x=0.5, y=0.5, font_size=14, showarrow=False,
+                    font=dict(color="#f7c948", family="Cinzel")
+                )]
+            )
+            st.plotly_chart(fig_tok_pie, use_container_width=True)
+
+        # ── ROW 4: Response time box plot (per model) ──
+        if any(len(ms_data[r["mkey"]]["response_times"]) > 1 for r in model_rows):
+            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:10px 0 6px;font-family:\'JetBrains Mono\',monospace;">📦 RESPONSE TIME DISTRIBUTION PER MODEL</div>', unsafe_allow_html=True)
+            fig_box = go.Figure()
+            for row in model_rows:
+                rts = ms_data[row["mkey"]]["response_times"]
+                if rts:
+                    fig_box.add_trace(go.Box(
+                        y=rts,
+                        name=row["model"][:20],
+                        marker_color=row["color"],
+                        line_color=row["color"],
+                        fillcolor=f"{row['color']}22",
+                        boxmean=True,
+                    ))
+            fig_box.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Response Time (s)"),
+                xaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(t=20, b=30, l=40, r=20), height=300,
+            )
+            st.plotly_chart(fig_box, use_container_width=True)
+
+        # ── ROW 5: Call count + cumulative tokens line ──
+        rc7, rc8 = st.columns(2)
+
+        with rc7:
+            call_counts = [r["calls"] for r in model_rows]
+            fig_calls = go.Figure(go.Bar(
+                x=[r["model"][:20] for r in model_rows],
+                y=call_counts,
+                marker=dict(
+                    color=call_counts,
+                    colorscale=[[0,"#2a1015"],[0.4,"#ff6b35"],[1,"#f7c948"]],
+                    line=dict(color='rgba(0,0,0,0)'),
+                ),
+                text=call_counts,
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=12),
+            ))
+            fig_calls.update_layout(
+                title=dict(text="💬 Total API Calls per Model", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a", tickangle=-20),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="calls"),
+                margin=dict(t=50, b=60, l=40, r=20), height=280,
+            )
+            st.plotly_chart(fig_calls, use_container_width=True)
+
+        with rc8:
+            # Scatter: avg_rt vs avg_cps (bubble = total tokens)
+            if len(model_rows) >= 1:
+                bubble_sizes = [max(10, r["total_tokens"] / 5) for r in model_rows]
+                fig_scatter = go.Figure(go.Scatter(
+                    x=[r["avg_rt"] for r in model_rows],
+                    y=[r["avg_cps"] for r in model_rows],
+                    mode='markers+text',
+                    marker=dict(
+                        size=bubble_sizes,
+                        color=[r["color"] for r in model_rows],
+                        line=dict(color='#060203', width=2),
+                        opacity=0.85,
+                        sizemode='diameter',
+                        sizeref=max(bubble_sizes)/40,
+                    ),
+                    text=[r["model"][:15] for r in model_rows],
+                    textposition='top center',
+                    textfont=dict(color='#c8917a', size=10),
+                    hovertemplate="<b>%{text}</b><br>Avg RT: %{x:.2f}s<br>Speed: %{y:.0f} c/s<extra></extra>",
+                ))
+                fig_scatter.update_layout(
+                    title=dict(text="🔴 Speed vs Latency (bubble = total tokens)", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#c8917a"),
+                    xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Avg Response Time (s) →"),
+                    yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Chars / Second ↑"),
+                    margin=dict(t=50, b=50, l=60, r=20), height=280,
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+        # ── Detailed Table ──
+        st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 8px;font-family:\'JetBrains Mono\',monospace;">📋 DETAILED MODEL STATS TABLE</div>', unsafe_allow_html=True)
+        table_rows = []
+        for row in model_rows:
+            table_rows.append({
+                "Model": row["model"],
+                "Provider": row["provider"].split()[0] if row["provider"] else "—",
+                "Calls": row["calls"],
+                "Avg RT (s)": f"{row['avg_rt']:.2f}",
+                "Min RT (s)": f"{row['min_rt']:.2f}",
+                "Max RT (s)": f"{row['max_rt']:.2f}",
+                "Avg Tokens": f"~{int(row['avg_tokens'])}",
+                "Total Tokens": f"~{int(row['total_tokens'])}",
+                "Avg Speed (c/s)": f"{row['avg_cps']:.0f}",
+                "Avg Chars": f"{int(row['avg_chars'])}",
+                "Positivity": f"{row['pos_rate']:.0%}",
+            })
+        if table_rows:
+            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+        # ── AI Recommendations ──
+        st.divider()
+        st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:0.85rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:10px;">💡 AI-POWERED RECOMMENDATIONS</div>', unsafe_allow_html=True)
+
+        if model_rows:
+            fastest     = min(model_rows, key=lambda x: x["avg_rt"])
+            most_tokens = max(model_rows, key=lambda x: x["avg_tokens"])
+            highest_cps = max(model_rows, key=lambda x: x["avg_cps"])
+            most_positive = max(model_rows, key=lambda x: x["pos_rate"])
+            most_calls  = max(model_rows, key=lambda x: x["calls"])
+
+            recs = [
+                (fastest["color"],       "⚡ Fastest Response",     fastest["model"],        f"{fastest['avg_rt']:.2f}s avg",           "Best for real-time, latency-sensitive applications"),
+                (highest_cps["color"],   "🚀 Highest Throughput",   highest_cps["model"],    f"{highest_cps['avg_cps']:.0f} chars/sec",  "Best for long-form content generation"),
+                (most_tokens["color"],   "📝 Most Verbose",         most_tokens["model"],    f"~{int(most_tokens['avg_tokens'])} tokens", "Best for detailed explanations and research"),
+                (most_positive["color"], "☀️ Most Positive Tone",   most_positive["model"],  f"{most_positive['pos_rate']:.0%} positive", "Best for customer-facing and creative tasks"),
+                (most_calls["color"],    "🏆 Most Used This Session", most_calls["model"],   f"{most_calls['calls']} calls",              "Your go-to model for this session"),
+            ]
+
+            rec_cols = st.columns(min(3, len(recs)))
+            for i, (color, title, model_name, stat, desc) in enumerate(recs):
+                with rec_cols[i % len(rec_cols)]:
+                    st.markdown(f"""
+                    <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid {color}33;
+                        border-left:3px solid {color};border-radius:12px;padding:14px;margin-bottom:10px;">
+                        <div style="font-size:0.65rem;color:{color};font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">{title}</div>
+                        <div style="font-family:'Cinzel',serif;font-size:0.85rem;color:#fdf0e8;font-weight:700;margin-bottom:4px;">{model_name[:28]}</div>
+                        <div style="font-size:0.72rem;color:{color};font-family:'JetBrains Mono',monospace;margin-bottom:6px;">{stat}</div>
+                        <div style="font-size:0.78rem;color:#c8917a;font-family:'Crimson Pro',serif;line-height:1.5;">{desc}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # ── Use-case matrix ──
+            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 8px;font-family:\'JetBrains Mono\',monospace;">🗺️ USE-CASE BEST-FIT MATRIX</div>', unsafe_allow_html=True)
+            use_cases = ["Real-time Chat", "Long Documents", "Code Generation", "Creative Writing", "Data Analysis", "Customer Support"]
+
+            # Score each model per use-case using weighted formula
+            matrix_data = []
+            for uc in use_cases:
+                row_uc = {"Use Case": uc}
+                for mr in model_rows:
+                    if uc == "Real-time Chat":
+                        score = max(0, 100 - mr["avg_rt"] * 20)
+                    elif uc == "Long Documents":
+                        score = min(100, mr["avg_tokens"] / 5)
+                    elif uc == "Code Generation":
+                        score = (mr["avg_cps"] / max(r["avg_cps"] for r in model_rows)) * 80 + mr["pos_rate"] * 20
+                    elif uc == "Creative Writing":
+                        score = mr["pos_rate"] * 60 + (mr["avg_chars"] / max(r["avg_chars"] for r in model_rows)) * 40
+                    elif uc == "Data Analysis":
+                        score = (mr["avg_tokens"] / max(r["avg_tokens"] for r in model_rows)) * 70 + mr["pos_rate"] * 30
+                    else:  # Customer Support
+                        score = mr["pos_rate"] * 70 + max(0, 100 - mr["avg_rt"] * 10) * 0.3
+                    row_uc[mr["model"][:15]] = f"{min(100,max(0,score)):.0f}%"
+                matrix_data.append(row_uc)
+
+            if matrix_data:
+                st.dataframe(pd.DataFrame(matrix_data), use_container_width=True, hide_index=True)
+
+            # ── Heatmap of scores ──
+            if len(model_rows) >= 2:
+                heat_models = [mr["model"][:18] for mr in model_rows]
+                heat_scores = []
+                for uc in use_cases:
+                    row_scores = []
+                    for mr in model_rows:
+                        if uc == "Real-time Chat":
+                            s = max(0, 100 - mr["avg_rt"] * 20)
+                        elif uc == "Long Documents":
+                            s = min(100, mr["avg_tokens"] / 5)
+                        elif uc == "Code Generation":
+                            s = (mr["avg_cps"] / max(r["avg_cps"] for r in model_rows)) * 80 + mr["pos_rate"] * 20
+                        elif uc == "Creative Writing":
+                            s = mr["pos_rate"] * 60 + (mr["avg_chars"] / max(r["avg_chars"] for r in model_rows)) * 40
+                        elif uc == "Data Analysis":
+                            s = (mr["avg_tokens"] / max(r["avg_tokens"] for r in model_rows)) * 70 + mr["pos_rate"] * 30
+                        else:
+                            s = mr["pos_rate"] * 70 + max(0, 100 - mr["avg_rt"] * 10) * 0.3
+                        row_scores.append(min(100, max(0, s)))
+                    heat_scores.append(row_scores)
+
+                fig_heat = go.Figure(data=go.Heatmap(
+                    z=heat_scores,
+                    x=heat_models,
+                    y=use_cases,
+                    colorscale=[
+                        [0.0, "#1d0406"],
+                        [0.3, "#e63946"],
+                        [0.6, "#ff6b35"],
+                        [0.8, "#f7c948"],
+                        [1.0, "#52b788"],
+                    ],
+                    text=[[f"{v:.0f}%" for v in row] for row in heat_scores],
+                    texttemplate="%{text}",
+                    textfont=dict(color="white", size=11, family="JetBrains Mono"),
+                    hoverongaps=False,
+                ))
+                fig_heat.update_layout(
+                    title=dict(text="🌡️ Performance Heatmap by Use Case", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#c8917a"),
+                    xaxis=dict(color="#c8917a", tickangle=-20),
+                    yaxis=dict(color="#c8917a"),
+                    margin=dict(t=50, b=60, l=140, r=20),
+                    height=350,
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# TAB 11: SETTINGS
 # ══════════════════════════════════════════════════════════════════
 with tab_settings:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">🛠 SETTINGS & CONFIGURATION</div>', unsafe_allow_html=True)
@@ -2766,7 +3157,9 @@ with tab_settings:
             <strong style="color:#ff6b35;font-family:'Cinzel',serif;font-size:1rem;">🔥 Phoenix AI Studio v5.0</strong><br><br>
             {''.join(f'<span style="color:{pd["color"]};">{pn.split("(")[0].strip()}</span><br>' for pn, pd in PROVIDERS.items())}
             <br>
-            <strong style="color:#fdf0e8;">NEW IN v5.0</strong><br>
+            <strong style="color:#fdf0e8;">NEW IN v5.1</strong><br>
+            🆚 Model Comparisons Tab (NEW)<br>
+            📋 Inline Report Summary (Fixed)<br>
             📈 Deep Stats Dashboard<br>
             🗒️ Session Notes System<br>
             ⚡ Model Benchmarking<br>
