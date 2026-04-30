@@ -1812,13 +1812,7 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                         """, unsafe_allow_html=True)
 
                         # Render formatted report
-                        st.markdown(f"""
-                        <div style="background:#0d0406;border:1px solid #2a1015;border-radius:0 0 16px 16px;
-                            padding:24px;font-family:'Crimson Pro',serif;font-size:1rem;color:#e8d5c8;line-height:1.85;
-                            max-height:75vh;overflow-y:auto;">
-                            {format_content(report_response)}
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.markdown(report_response)
 
                         # Export report
                         st.download_button(
