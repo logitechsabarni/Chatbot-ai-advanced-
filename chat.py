@@ -1771,8 +1771,8 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                             0.4, max_report_tokens, active_api_key
                         )
                         report_response = re.sub(r'<!--.*?-->', '', report_response, flags=re.DOTALL)
-                        report_response = re.sub(r'^.*?</div>', '', report_response, flags=re.DOTALL)
-                        report_response = re.sub(r'</div>\s*$', '', report_response, flags=re.DOTALL)
+                        report_response = re.sub(r'<div.*?>.*?</div>', '', report_response, flags=re.DOTALL)
+                        report_response = re.sub(r'<span.*?>.*?</span>', '', report_response, flags=re.DOTALL)
                         rt_report = round(time.time() - t0, 2)
 
                         rpt_obj = {
