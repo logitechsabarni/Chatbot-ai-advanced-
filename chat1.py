@@ -1811,8 +1811,7 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                         </div>
                         """, unsafe_allow_html=True)
 
-                        # Render formatted report
-                        st.markdown(report_response)
+                       
 
                         # Export report
                         st.download_button(
