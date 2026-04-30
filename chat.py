@@ -662,6 +662,8 @@ for key, val in {
     "prompt_tab_result": None,
     "prompt_tab_query":  "",
     "_run_prompt_tab":   False,
+    "flashcard_history": [],
+    "flashcard_log":     [],
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -2131,43 +2133,53 @@ with tab_bench:
 # TAB 8: FLASHCARDS
 # ══════════════════════════════════════════════════════════════════
 with tab_flash:
-    st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">🎯 AI FLASHCARD GENERATOR</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-size:0.78rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:12px;">Generate AI-powered flashcards for any topic and test your knowledge</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:0.3rem;">🎯 AI FLASHCARD GENERATOR</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.78rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:12px;">Generate stunning AI-powered flashcards · track your study progress · explore with charts</div>', unsafe_allow_html=True)
 
-    col_fc1, col_fc2 = st.columns(2)
+    # ── Generator controls ──
+    col_fc1, col_fc2, col_fc3 = st.columns([2, 2, 2])
     with col_fc1:
         flash_category = st.selectbox("Category", list(FLASHCARD_TOPICS.keys()), key="flash_cat")
-        flash_topic = st.selectbox("Topic", FLASHCARD_TOPICS[flash_category], key="flash_topic")
     with col_fc2:
-        custom_flash = st.text_input("Or enter custom topic", placeholder="e.g. React hooks, Kubernetes, etc.", key="custom_flash")
+        flash_topic = st.selectbox("Topic", FLASHCARD_TOPICS[flash_category], key="flash_topic")
+    with col_fc3:
+        custom_flash = st.text_input("Custom topic (overrides above)", placeholder="e.g. React hooks, Kubernetes…", key="custom_flash")
 
     final_topic = custom_flash.strip() if custom_flash.strip() else flash_topic
 
-    if st.button(f"🔥 Generate Flashcard: {final_topic}", use_container_width=True):
+    # ── store last flashcard in session so button works AFTER rerun ──
+    if "last_flashcard" not in st.session_state:
+        st.session_state.last_flashcard = None
+
+    if st.button(f"🔥 Generate Flashcard: {final_topic}", use_container_width=True, key="gen_flash_btn"):
         if not active_api_key:
-            st.error("⚠ No API key configured.")
+            st.error("⚠ No API key configured in the sidebar.")
         else:
-            with st.spinner(f"Generating flashcard for: {final_topic}…"):
+            with st.spinner(f"🔥 Crafting flashcard for: {final_topic}…"):
                 try:
-                    prompt = f"""Create a concise, educational flashcard for the topic: "{final_topic}"
+                    prompt = f"""Create an educational flashcard for the topic: "{final_topic}"
 
-Format your response EXACTLY like this:
-FRONT: [A clear question or concept to test knowledge]
-BACK: [A comprehensive but concise answer (3-6 sentences)]
-EXAMPLE: [One concrete code or real-world example]
-KEY_POINT: [The single most important thing to remember]"""
+Respond EXACTLY in this format (no extra text before or after):
+FRONT: [A sharp, testable question about the topic]
+BACK: [A thorough answer in 3-5 sentences — be specific and informative]
+EXAMPLE: [A concrete code snippet or real-world example — be specific]
+KEY_POINT: [The single most critical thing to remember, in one sentence]
+DIFFICULTY: [Easy / Medium / Hard]
+CATEGORY: [{flash_category}]"""
 
-                    response = call_ai(provider, model_sel,
-                        [{"role":"user","content":prompt}],
-                        "You are an expert educator creating clear, accurate, detailed flashcards. Always follow the exact format requested.",
-                        0.5, 800, active_api_key)
+                    response = call_ai(
+                        provider, model_sel,
+                        [{"role": "user", "content": prompt}],
+                        "You are an expert educator and technical writer. Create precise, informative flashcards. Always follow the exact format with FRONT:, BACK:, EXAMPLE:, KEY_POINT:, DIFFICULTY:, CATEGORY: labels.",
+                        0.5, 900, active_api_key
+                    )
 
-                    # Robust parsing — handles varied model output formats
+                    # ── Robust multi-line parser ──
                     parsed = {}
                     current_key = None
                     for line in response.strip().split('\n'):
                         matched = False
-                        for key in ["FRONT:", "BACK:", "EXAMPLE:", "KEY_POINT:"]:
+                        for key in ["FRONT:", "BACK:", "EXAMPLE:", "KEY_POINT:", "DIFFICULTY:", "CATEGORY:"]:
                             if line.strip().upper().startswith(key):
                                 current_key = key.replace(":", "").lower()
                                 parsed[current_key] = line.strip()[len(key):].strip()
@@ -2176,51 +2188,400 @@ KEY_POINT: [The single most important thing to remember]"""
                         if not matched and current_key and line.strip():
                             parsed[current_key] = parsed.get(current_key, "") + " " + line.strip()
 
-                    front     = parsed.get("front", f"What is {final_topic}?")
-                    back      = parsed.get("back", response[:600])
-                    example   = parsed.get("example", "")
-                    key_point = parsed.get("key_point", "")
+                    front      = parsed.get("front",      f"What is {final_topic}?")
+                    back       = parsed.get("back",       response[:500])
+                    example    = parsed.get("example",    "")
+                    key_point  = parsed.get("key_point",  "")
+                    difficulty = parsed.get("difficulty", "Medium").strip()
+                    category   = parsed.get("category",  flash_category)
 
+                    diff_color = {"Easy": "#52b788", "Medium": "#f7c948", "Hard": "#e63946"}.get(difficulty, "#c8917a")
+
+                    # ── Save to history ──
+                    fc_entry = {
+                        "topic":      final_topic,
+                        "category":   flash_category,
+                        "front":      front,
+                        "back":       back,
+                        "example":    example,
+                        "key_point":  key_point,
+                        "difficulty": difficulty,
+                        "timestamp":  datetime.now().strftime("%H:%M"),
+                        "date":       datetime.now().strftime("%d/%m"),
+                    }
+                    st.session_state.flashcard_history.append(fc_entry)
+                    st.session_state.flashcard_log.append({
+                        "time":       datetime.now().strftime("%H:%M"),
+                        "topic":      final_topic,
+                        "category":   flash_category,
+                        "difficulty": difficulty,
+                    })
                     st.session_state.flashcard_idx += 1
-
-                    st.markdown(f"""
-                        border-radius:16px;padding:24px;margin:12px 0;position:relative;overflow:hidden;">
-                        <div style="position:absolute;top:0;left:0;right:0;height:2px;
-                            background:linear-gradient(90deg,transparent,#ff6b35,#f7c948,transparent);"></div>
-
-                        <div style="font-family:'Cinzel',serif;font-size:0.7rem;color:#4a2a22;letter-spacing:2px;margin-bottom:12px;">FLASHCARD · {flash_category.upper()}</div>
-
-                        <div style="background:#0d0406;border:1px solid #2a1015;border-radius:10px;padding:16px;margin-bottom:12px;">
-                            <div style="font-size:0.62rem;color:#ff6b35;font-family:'JetBrains Mono',monospace;margin-bottom:8px;">📋 FRONT</div>
-                            <div style="color:#fdf0e8;font-size:1.05rem;font-family:'Crimson Pro',serif;line-height:1.6;">{front}</div>
-                        </div>
-
-                        <div style="background:#0d0406;border:1px solid #52b78830;border-radius:10px;padding:16px;margin-bottom:12px;">
-                            <div style="font-size:0.62rem;color:#52b788;font-family:'JetBrains Mono',monospace;margin-bottom:8px;">✅ BACK</div>
-                            <div style="color:#e8d5c8;font-size:0.95rem;font-family:'Crimson Pro',serif;line-height:1.7;">{back}</div>
-                        </div>
-
-                        {"" if not example else f'<div style="background:#0d0406;border:1px solid #74c0fc30;border-radius:10px;padding:16px;margin-bottom:12px;"><div style="font-size:0.62rem;color:#74c0fc;font-family:\'JetBrains Mono\',monospace;margin-bottom:8px;">💡 EXAMPLE</div><div style="color:#e8d5c8;font-size:0.9rem;font-family:\'JetBrains Mono\',monospace;line-height:1.6;">{example}</div></div>'}
-
-                        {"" if not key_point else f'<div style="background:linear-gradient(135deg,#f7c94810,#ff6b3508);border:1px solid #f7c94830;border-radius:10px;padding:12px;"><div style="font-size:0.62rem;color:#f7c948;font-family:\'JetBrains Mono\',monospace;margin-bottom:6px;">⭐ KEY POINT</div><div style="color:#f7c948;font-size:0.9rem;font-family:\'Crimson Pro\',serif;font-weight:600;">{key_point}</div></div>'}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # Send to chat option
-                    if st.button(f"💬 Ask Phoenix to explain {final_topic} further", use_container_width=True):
-                        st.session_state._pending_prompt = f"Please give me a detailed explanation of: {final_topic}. Include practical examples and common mistakes to avoid."
-                        st.rerun()
+                    st.session_state.last_flashcard = fc_entry
 
                 except Exception as e:
-                    st.error(f"Flashcard generation failed: {e}")
+                    st.error(f"⚠ Flashcard generation failed: {str(e)}")
+                    st.session_state.last_flashcard = None
 
-    # Quiz score tracker
+    # ── Render the last generated flashcard as a beautiful card ──
+    fc = st.session_state.last_flashcard
+    if fc:
+        diff_color = {"Easy": "#52b788", "Medium": "#f7c948", "Hard": "#e63946"}.get(fc.get("difficulty","Medium"), "#c8917a")
+        cat_icons  = {"Python":"🐍","JavaScript":"🌐","ML Concepts":"🧠","System Design":"🏗️","Security":"🔐"}
+        cat_icon   = cat_icons.get(fc["category"], "🎯")
+
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(145deg, #120608 0%, #0d0406 50%, #060203 100%);
+            border: 1px solid #ff6b3530;
+            border-radius: 20px;
+            padding: 0;
+            margin: 16px 0;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 8px 40px rgba(255,107,53,0.12), 0 2px 8px rgba(0,0,0,0.4);
+        ">
+            <!-- Top gradient bar -->
+            <div style="height:4px;background:linear-gradient(90deg,#e63946,#ff6b35,#f7c948,#52b788,#74c0fc,#c084fc);border-radius:20px 20px 0 0;"></div>
+
+            <!-- Header strip -->
+            <div style="
+                padding: 16px 24px 12px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #2a1015;
+                background: linear-gradient(90deg,#1d0b0e22,transparent);
+            ">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="font-size:1.6rem;">{cat_icon}</div>
+                    <div>
+                        <div style="font-family:'Cinzel',serif;font-size:0.65rem;color:#4a2a22;letter-spacing:3px;text-transform:uppercase;">Flashcard</div>
+                        <div style="font-family:'Cinzel',serif;font-size:0.95rem;color:#ff6b35;font-weight:700;letter-spacing:1px;">{fc["topic"]}</div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <span style="font-size:0.65rem;padding:4px 12px;border-radius:20px;background:{diff_color}18;color:{diff_color};border:1px solid {diff_color}44;font-family:'JetBrains Mono',monospace;font-weight:700;">{fc.get("difficulty","Medium").upper()}</span>
+                    <span style="font-size:0.65rem;padding:4px 12px;border-radius:20px;background:#c084fc18;color:#c084fc;border:1px solid #c084fc44;font-family:'JetBrains Mono',monospace;">{fc["category"]}</span>
+                    <span style="font-size:0.65rem;padding:4px 10px;border-radius:20px;background:#2a1015;color:#4a2a22;font-family:'JetBrains Mono',monospace;">{fc["timestamp"]}</span>
+                </div>
+            </div>
+
+            <!-- Body -->
+            <div style="padding:20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+                <!-- FRONT -->
+                <div style="
+                    background:linear-gradient(135deg,#1d0b0e,#120608);
+                    border:1px solid #ff6b3530;
+                    border-top:3px solid #ff6b35;
+                    border-radius:14px;
+                    padding:18px;
+                    position:relative;
+                ">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#ff6b35;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff6b35;box-shadow:0 0 6px #ff6b35;"></span>
+                        QUESTION
+                    </div>
+                    <div style="font-family:'Crimson Pro',serif;font-size:1.1rem;color:#fdf0e8;line-height:1.65;font-weight:600;">{fc["front"]}</div>
+                </div>
+
+                <!-- BACK -->
+                <div style="
+                    background:linear-gradient(135deg,#051a10,#060e08);
+                    border:1px solid #52b78830;
+                    border-top:3px solid #52b788;
+                    border-radius:14px;
+                    padding:18px;
+                ">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#52b788;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#52b788;box-shadow:0 0 6px #52b788;"></span>
+                        ANSWER
+                    </div>
+                    <div style="font-family:'Crimson Pro',serif;font-size:0.97rem;color:#d4f0e4;line-height:1.75;">{fc["back"]}</div>
+                </div>
+
+            </div>
+
+            <!-- Example + Key Point row -->
+            <div style="padding:0 24px 20px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+                <!-- EXAMPLE -->
+                <div style="
+                    background:linear-gradient(135deg,#07111a,#050d14);
+                    border:1px solid #74c0fc30;
+                    border-top:3px solid #74c0fc;
+                    border-radius:14px;
+                    padding:16px;
+                ">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#74c0fc;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#74c0fc;box-shadow:0 0 6px #74c0fc;"></span>
+                        EXAMPLE
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.82rem;color:#bde0f5;line-height:1.65;white-space:pre-wrap;">{fc.get("example","No example provided.") or "No example provided."}</div>
+                </div>
+
+                <!-- KEY POINT -->
+                <div style="
+                    background:linear-gradient(135deg,#1a1205,#120e04);
+                    border:1px solid #f7c94830;
+                    border-top:3px solid #f7c948;
+                    border-radius:14px;
+                    padding:16px;
+                ">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.6rem;color:#f7c948;letter-spacing:2px;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+                        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f7c948;box-shadow:0 0 6px #f7c948;"></span>
+                        ⭐ KEY POINT
+                    </div>
+                    <div style="font-family:'Crimson Pro',serif;font-size:1rem;color:#fdf0c8;line-height:1.65;font-weight:600;font-style:italic;">{fc.get("key_point","Remember the core concept!") or "Remember the core concept!"}</div>
+                </div>
+
+            </div>
+
+            <!-- Bottom bar -->
+            <div style="height:2px;background:linear-gradient(90deg,transparent,#ff6b3530,transparent);"></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Action buttons OUTSIDE the spinner, so they work ──
+        col_a1, col_a2, col_a3 = st.columns(3)
+        with col_a1:
+            if st.button(f"💬 Ask Phoenix: Explain '{fc['topic']}' deeper", use_container_width=True, key="flash_explain_btn"):
+                st.session_state._pending_prompt = (
+                    f"Give me a thorough, detailed explanation of: **{fc['topic']}**.\n\n"
+                    f"Cover:\n1. Core concept and how it works\n2. Why it matters\n3. Common mistakes or misconceptions\n"
+                    f"4. Practical real-world use cases\n5. Best practices and tips\n\nBe specific and use examples."
+                )
+                st.rerun()
+        with col_a2:
+            if st.button("🔄 Generate Another on Same Topic", use_container_width=True, key="flash_again_btn"):
+                st.session_state._pending_prompt = None
+                # Re-trigger by clearing last card and rerunning
+                st.session_state.last_flashcard = None
+                st.rerun()
+        with col_a3:
+            if st.button("📥 Save to Notes", use_container_width=True, key="flash_save_note_btn"):
+                note_text = f"**{fc['topic']}**\n\nQ: {fc['front']}\n\nA: {fc['back']}\n\nExample: {fc.get('example','')}\n\nKey Point: {fc.get('key_point','')}"
+                st.session_state.notes.append({
+                    "title": f"Flashcard: {fc['topic']}",
+                    "content": note_text,
+                    "tag": "💡 Idea",
+                    "created": datetime.now().strftime("%H:%M %d/%m"),
+                })
+                st.success("✅ Saved to Notes tab!")
+
+    # ── STUDY TRACKER & CHARTS ────────────────────────────────────
     st.divider()
-    st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin-bottom:8px;font-family:\'JetBrains Mono\',monospace;">📊 STUDY TRACKER</div>', unsafe_allow_html=True)
-    col_qs1, col_qs2, col_qs3 = st.columns(3)
-    col_qs1.metric("Topics Studied", len(st.session_state.get("flashcard_history", [])))
-    col_qs2.metric("Flashcards Generated", st.session_state.flashcard_idx)
-    col_qs3.metric("Session Duration", f"{(datetime.now() - datetime.fromisoformat(st.session_state.session_start)).seconds // 60}m")
+    st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:0.85rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">📊 STUDY TRACKER & ANALYTICS</div>', unsafe_allow_html=True)
+
+    fh = st.session_state.flashcard_history
+
+    # ── Metrics row ──
+    dur_mins = (datetime.now() - datetime.fromisoformat(st.session_state.session_start)).seconds // 60
+    unique_topics    = list(set(f["topic"] for f in fh))
+    unique_cats      = list(set(f["category"] for f in fh))
+    easy_count       = sum(1 for f in fh if f.get("difficulty") == "Easy")
+    medium_count     = sum(1 for f in fh if f.get("difficulty") == "Medium")
+    hard_count       = sum(1 for f in fh if f.get("difficulty") == "Hard")
+
+    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+    mc1.metric("📚 Topics Studied",    len(unique_topics))
+    mc2.metric("🎯 Cards Generated",   st.session_state.flashcard_idx)
+    mc3.metric("🗂️ Categories",        len(unique_cats))
+    mc4.metric("⏱️ Study Time",        f"{dur_mins}m")
+    mc5.metric("🔥 Streak",            f"{st.session_state.flashcard_idx} cards")
+
+    if not fh:
+        st.markdown("""
+        <div style="text-align:center;padding:3rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">
+            <div style="font-size:3rem;margin-bottom:1rem;animation:float 3s ease-in-out infinite;display:inline-block;">🎯</div>
+            <div>Generate your first flashcard above to see study charts!</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # ── ROW 1: Category bar + Difficulty pie ──
+        ch1, ch2 = st.columns(2)
+
+        with ch1:
+            cat_counts = Counter(f["category"] for f in fh)
+            cat_colors = ["#ff6b35","#f7c948","#52b788","#74c0fc","#c084fc","#e63946","#ff8c42","#67e8f9"]
+            fig_cat = go.Figure(go.Bar(
+                x=list(cat_counts.keys()),
+                y=list(cat_counts.values()),
+                marker=dict(
+                    color=cat_colors[:len(cat_counts)],
+                    line=dict(color='rgba(0,0,0,0)'),
+                    opacity=0.9,
+                ),
+                text=list(cat_counts.values()),
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=12, family="Cinzel"),
+            ))
+            fig_cat.update_layout(
+                title=dict(text="📚 Cards by Category", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a", tickangle=-20),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Cards"),
+                margin=dict(t=50, b=60, l=40, r=20), height=300,
+            )
+            st.plotly_chart(fig_cat, use_container_width=True)
+
+        with ch2:
+            diff_vals   = [easy_count, medium_count, hard_count]
+            diff_labels = ["Easy", "Medium", "Hard"]
+            diff_colors = ["#52b788", "#f7c948", "#e63946"]
+            fig_diff = go.Figure(data=[go.Pie(
+                labels=diff_labels,
+                values=[max(v, 0) for v in diff_vals],
+                hole=0.6,
+                marker=dict(colors=diff_colors, line=dict(color='#060203', width=3)),
+                textfont=dict(color='#fdf0e8', size=12, family="Cinzel"),
+                pull=[0.05, 0.05, 0.05],
+            )])
+            total_cards = max(1, sum(diff_vals))
+            fig_diff.update_layout(
+                title=dict(text="🎯 Difficulty Distribution", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#c8917a"),
+                legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(t=50, b=20, l=20, r=20), height=300,
+                annotations=[dict(
+                    text=f"<b>{total_cards}</b><br><span style='font-size:10px'>total</span>",
+                    x=0.5, y=0.5, font_size=16, showarrow=False,
+                    font=dict(color="#ff6b35", family="Cinzel")
+                )]
+            )
+            st.plotly_chart(fig_diff, use_container_width=True)
+
+        # ── ROW 2: Timeline + Topic treemap-style bar ──
+        ch3, ch4 = st.columns(2)
+
+        with ch3:
+            # Cards generated over time
+            times = [f["timestamp"] for f in fh]
+            fig_time = go.Figure()
+            fig_time.add_trace(go.Scatter(
+                x=list(range(1, len(fh)+1)),
+                y=list(range(1, len(fh)+1)),
+                mode='lines+markers',
+                name="Cumulative Cards",
+                line=dict(color='#ff6b35', width=3),
+                marker=dict(
+                    color=[{"Easy":"#52b788","Medium":"#f7c948","Hard":"#e63946"}.get(f.get("difficulty","Medium"),"#c8917a") for f in fh],
+                    size=12,
+                    line=dict(color='#060203', width=2),
+                ),
+                fill='tozeroy',
+                fillcolor='rgba(255,107,53,0.07)',
+                text=[f["topic"] for f in fh],
+                hovertemplate="Card #%{x}: %{text}<extra></extra>",
+            ))
+            fig_time.update_layout(
+                title=dict(text="📈 Study Progress Timeline", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Card #"),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Total Cards"),
+                showlegend=False,
+                margin=dict(t=50, b=40, l=40, r=20), height=300,
+            )
+            st.plotly_chart(fig_time, use_container_width=True)
+
+        with ch4:
+            # Topics horizontal bar
+            topic_counts = Counter(f["topic"] for f in fh)
+            top_topics   = topic_counts.most_common(8)
+            t_names      = [t[0][:25] for t in top_topics]
+            t_vals       = [t[1] for t in top_topics]
+            t_colors     = ["#ff6b35","#f7c948","#52b788","#74c0fc","#c084fc","#ff8c42","#e63946","#67e8f9"]
+            fig_top = go.Figure(go.Bar(
+                x=t_vals,
+                y=t_names,
+                orientation='h',
+                marker=dict(
+                    color=t_colors[:len(t_names)],
+                    line=dict(color='rgba(0,0,0,0)'),
+                    opacity=0.9,
+                ),
+                text=t_vals,
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_top.update_layout(
+                title=dict(text="🔥 Most Studied Topics", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Times"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=20, l=140, r=40), height=300,
+            )
+            st.plotly_chart(fig_top, use_container_width=True)
+
+        # ── ROW 3: Difficulty over time stacked + radar ──
+        ch5, ch6 = st.columns(2)
+
+        with ch5:
+            # Difficulty over time — stacked area
+            easy_running   = [1 if f.get("difficulty")=="Easy" else 0 for f in fh]
+            medium_running = [1 if f.get("difficulty")=="Medium" else 0 for f in fh]
+            hard_running   = [1 if f.get("difficulty")=="Hard" else 0 for f in fh]
+            x_idx = list(range(1, len(fh)+1))
+
+            fig_stack = go.Figure()
+            fig_stack.add_trace(go.Bar(x=x_idx, y=easy_running, name="Easy",
+                marker_color="#52b788", opacity=0.85))
+            fig_stack.add_trace(go.Bar(x=x_idx, y=medium_running, name="Medium",
+                marker_color="#f7c948", opacity=0.85))
+            fig_stack.add_trace(go.Bar(x=x_idx, y=hard_running, name="Hard",
+                marker_color="#e63946", opacity=0.85))
+            fig_stack.update_layout(
+                title=dict(text="🎲 Difficulty per Card", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                barmode='stack',
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Card #"),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a"),
+                legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(t=50, b=40, l=40, r=20), height=280,
+            )
+            st.plotly_chart(fig_stack, use_container_width=True)
+
+        with ch6:
+            # Study readiness radar
+            total = max(1, len(fh))
+            categories_rad = list(FLASHCARD_TOPICS.keys())
+            cat_vals_rad   = [Counter(f["category"] for f in fh).get(c, 0) / total * 100 for c in categories_rad]
+            fig_rad = go.Figure(data=go.Scatterpolar(
+                r=cat_vals_rad + [cat_vals_rad[0]],
+                theta=categories_rad + [categories_rad[0]],
+                fill='toself',
+                fillcolor='rgba(255,107,53,0.12)',
+                line=dict(color='#ff6b35', width=2.5),
+                marker=dict(color='#f7c948', size=8),
+                name="Coverage"
+            ))
+            fig_rad.update_layout(
+                title=dict(text="🕸️ Knowledge Coverage Radar", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                polar=dict(
+                    bgcolor='rgba(0,0,0,0)',
+                    radialaxis=dict(visible=True, range=[0,100], gridcolor='#2a1015', color='#4a2a22',
+                                   tickfont=dict(size=8), ticksuffix="%"),
+                    angularaxis=dict(gridcolor='#2a1015', color='#c8917a', tickfont=dict(size=10)),
+                ),
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#c8917a'),
+                showlegend=False,
+                margin=dict(t=50, b=20, l=40, r=40), height=280,
+            )
+            st.plotly_chart(fig_rad, use_container_width=True)
+
+        # ── History table ──
+        st.markdown('<div style="font-size:0.72rem;color:#c8917a;margin:10px 0 6px;font-family:\'JetBrains Mono\',monospace;">📋 FLASHCARD HISTORY</div>', unsafe_allow_html=True)
+        hist_rows = [{"#": i+1, "Time": f["timestamp"], "Topic": f["topic"],
+                      "Category": f["category"], "Difficulty": f.get("difficulty","—")}
+                     for i, f in enumerate(reversed(fh[-15:]))]
+        if hist_rows:
+            st.dataframe(pd.DataFrame(hist_rows), use_container_width=True, hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════
