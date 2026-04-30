@@ -2747,9 +2747,473 @@ with tab_health:
     for icon, tip, color in tips:
         st.markdown(f'<div style="background:{color}0a;border:1px solid {color}22;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:0.82rem;color:{color};font-family:\'Crimson Pro\',serif;">{icon} {tip}</div>', unsafe_allow_html=True)
 
+# ══════════════════════════════════════════════════════════════════
+# TAB 10: MODEL COMPARISONS  ← NEW TAB
+# ══════════════════════════════════════════════════════════════════
+with tab_modelcomp:
+    st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:0.3rem;">🆚 MODEL COMPARISONS & AI ANALYSIS</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.78rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;margin-bottom:14px;">Live stats auto-update as you chat across different models · switch models in sidebar to add data</div>', unsafe_allow_html=True)
+
+    ms_data = st.session_state.model_stats
+
+    if not ms_data:
+        st.markdown("""
+        <div style="text-align:center;padding:4rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">
+            <div style="font-size:4rem;margin-bottom:1rem;animation:float 3s ease-in-out infinite;display:inline-block;">🆚</div>
+            <div style="font-size:0.9rem;margin-bottom:8px;">No model data yet</div>
+            <div style="font-size:0.75rem;color:#3a1a18;">Chat with at least one model to see comparison data.<br>Switch between models in the sidebar to compare multiple.</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # ── Build summary table ──
+        model_rows = []
+        for mkey, ms in ms_data.items():
+            calls      = ms["calls"]
+            avg_rt     = ms["total_rt"] / max(1, calls)
+            avg_tokens = ms["total_tokens"] / max(1, calls)
+            avg_chars  = ms["total_chars"] / max(1, calls)
+            avg_cps    = avg_chars / max(0.001, avg_rt)
+            pos_rate   = ms["sentiments"].count("positive") / max(1, len(ms["sentiments"]))
+            min_rt     = min(ms["response_times"]) if ms["response_times"] else 0
+            max_rt     = max(ms["response_times"]) if ms["response_times"] else 0
+            model_rows.append({
+                "mkey": mkey,
+                "provider": ms["provider_label"],
+                "model": ms["model"],
+                "color": ms["color"],
+                "calls": calls,
+                "avg_rt": avg_rt,
+                "avg_tokens": avg_tokens,
+                "avg_chars": avg_chars,
+                "avg_cps": avg_cps,
+                "pos_rate": pos_rate,
+                "min_rt": min_rt,
+                "max_rt": max_rt,
+                "total_tokens": ms["total_tokens"],
+            })
+
+        model_rows.sort(key=lambda x: x["avg_rt"])
+
+        # ── Top-level scorecards ──
+        st.markdown('<div style="font-size:0.72rem;color:#ff6b35;font-family:\'JetBrains Mono\',monospace;letter-spacing:2px;margin-bottom:10px;">🏆 LEADERBOARD</div>', unsafe_allow_html=True)
+
+        leader_cols = st.columns(min(4, len(model_rows)))
+        medals = ["🥇", "🥈", "🥉", "🏅"]
+        for i, row in enumerate(model_rows[:4]):
+            with leader_cols[i]:
+                speed_label = "Fastest" if i == 0 else f"#{i+1} Speed"
+                st.markdown(f"""
+                <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid {row['color']}33;
+                    border-top:3px solid {row['color']};border-radius:12px;padding:14px;text-align:center;margin-bottom:8px;">
+                    <div style="font-size:1.8rem;margin-bottom:4px;">{medals[i]}</div>
+                    <div style="font-family:'Cinzel',serif;font-size:0.7rem;color:{row['color']};letter-spacing:1px;font-weight:700;">{speed_label}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:#c8917a;margin:4px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{row['model']}">{row['model'][:22]}</div>
+                    <div style="font-size:0.65rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">{row['provider'].split()[0]}</div>
+                    <div style="font-family:'Cinzel',serif;font-size:1.3rem;color:{row['color']};font-weight:700;margin-top:6px;">{row['avg_rt']:.2f}s</div>
+                    <div style="font-size:0.62rem;color:#4a2a22;font-family:'JetBrains Mono',monospace;">avg response time</div>
+                    <div style="display:flex;justify-content:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                        <span style="font-size:0.6rem;padding:2px 8px;border-radius:10px;background:{row['color']}10;color:{row['color']};border:1px solid {row['color']}22;">{row['calls']} calls</span>
+                        <span style="font-size:0.6rem;padding:2px 8px;border-radius:10px;background:#f7c94810;color:#f7c948;border:1px solid #f7c94822;">{row['avg_cps']:.0f} c/s</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── ROW 1: Response Time Bar + Token Usage Bar ──
+        rc1, rc2 = st.columns(2)
+
+        with rc1:
+            model_names = [r["model"][:25] for r in model_rows]
+            avg_rts     = [r["avg_rt"] for r in model_rows]
+            colors_bar  = [r["color"] for r in model_rows]
+
+            fig_rt = go.Figure(go.Bar(
+                x=avg_rts,
+                y=model_names,
+                orientation='h',
+                marker=dict(
+                    color=colors_bar,
+                    line=dict(color='rgba(0,0,0,0)'),
+                    opacity=0.9,
+                ),
+                text=[f"{v:.2f}s" for v in avg_rts],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_rt.update_layout(
+                title=dict(text="⏱ Avg Response Time (lower = faster)", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="seconds"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=60), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_rt, use_container_width=True)
+
+        with rc2:
+            avg_toks = [r["avg_tokens"] for r in model_rows]
+            fig_tok = go.Figure(go.Bar(
+                x=avg_toks,
+                y=model_names,
+                orientation='h',
+                marker=dict(
+                    color=colors_bar,
+                    line=dict(color='rgba(0,0,0,0)'),
+                    opacity=0.85,
+                ),
+                text=[f"~{int(v)}" for v in avg_toks],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_tok.update_layout(
+                title=dict(text="⚡ Avg Tokens per Response", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="tokens"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=60), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_tok, use_container_width=True)
+
+        # ── ROW 2: Speed (c/s) Bar + Positivity Bar ──
+        rc3, rc4 = st.columns(2)
+
+        with rc3:
+            avg_cps_vals = [r["avg_cps"] for r in model_rows]
+            fig_cps = go.Figure(go.Bar(
+                x=avg_cps_vals,
+                y=model_names,
+                orientation='h',
+                marker=dict(
+                    color=avg_cps_vals,
+                    colorscale=[[0,"#e63946"],[0.4,"#f7c948"],[0.7,"#52b788"],[1,"#67e8f9"]],
+                    showscale=True,
+                    colorbar=dict(tickfont=dict(color="#c8917a"), title=dict(text="c/s", font=dict(color="#c8917a"))),
+                    line=dict(color='rgba(0,0,0,0)'),
+                ),
+                text=[f"{int(v)} c/s" for v in avg_cps_vals],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_cps.update_layout(
+                title=dict(text="🚀 Characters per Second (higher = faster output)", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="chars/sec"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=80), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_cps, use_container_width=True)
+
+        with rc4:
+            pos_rates = [r["pos_rate"] * 100 for r in model_rows]
+            pos_colors_bar = ["#52b788" if v >= 60 else "#f7c948" if v >= 40 else "#e63946" for v in pos_rates]
+            fig_pos = go.Figure(go.Bar(
+                x=pos_rates,
+                y=model_names,
+                orientation='h',
+                marker=dict(color=pos_colors_bar, line=dict(color='rgba(0,0,0,0)'), opacity=0.9),
+                text=[f"{v:.0f}%" for v in pos_rates],
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=11),
+            ))
+            fig_pos.update_layout(
+                title=dict(text="☀️ Positive Sentiment Rate", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="%", range=[0, 110]),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                margin=dict(t=50, b=30, l=10, r=60), height=max(200, len(model_rows)*55),
+            )
+            st.plotly_chart(fig_pos, use_container_width=True)
+
+        # ── ROW 3: Multi-metric Radar + Provider Pie ──
+        rc5, rc6 = st.columns(2)
+
+        with rc5:
+            # Radar: normalize each metric 0-100 across models
+            if len(model_rows) >= 1:
+                radar_cats = ["Speed", "Output Volume", "Positivity", "Consistency", "Efficiency"]
+                max_cps    = max(r["avg_cps"] for r in model_rows) or 1
+                max_chars  = max(r["avg_chars"] for r in model_rows) or 1
+                min_rt_all = min(r["avg_rt"] for r in model_rows) or 0.001
+
+                fig_radar = go.Figure()
+                for row in model_rows:
+                    rt_range = (row["max_rt"] - row["min_rt"]) if len(ms_data[row["mkey"]]["response_times"]) > 1 else 0
+                    consistency = max(0, 100 - (rt_range / max(row["avg_rt"], 0.001)) * 100)
+                    vals = [
+                        min(100, (row["avg_cps"] / max_cps) * 100),
+                        min(100, (row["avg_chars"] / max_chars) * 100),
+                        row["pos_rate"] * 100,
+                        consistency,
+                        min(100, (row["avg_tokens"] / max(r["avg_tokens"] for r in model_rows)) * 100),
+                    ]
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=vals + [vals[0]],
+                        theta=radar_cats + [radar_cats[0]],
+                        fill='toself',
+                        fillcolor = "rgba(0, 123, 255, 0.2)",
+                        line=dict(color=row['color'], width=2),
+                        marker=dict(color=row['color'], size=6),
+                        name=row['model'][:20],
+                    ))
+                fig_radar.update_layout(
+                    title=dict(text="🕸️ Multi-Model Radar Comparison", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                    polar=dict(
+                        bgcolor='rgba(0,0,0,0)',
+                        radialaxis=dict(visible=True, range=[0,100], gridcolor='#2a1015', color='#4a2a22',
+                                       tickfont=dict(size=8), ticksuffix="%"),
+                        angularaxis=dict(gridcolor='#2a1015', color='#c8917a', tickfont=dict(size=10)),
+                    ),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#c8917a'),
+                    legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(t=50, b=20, l=40, r=40), height=360,
+                )
+                st.plotly_chart(fig_radar, use_container_width=True)
+
+        with rc6:
+            # Total tokens per model (pie)
+            tok_labels = [r["model"][:20] for r in model_rows]
+            tok_vals2  = [r["total_tokens"] for r in model_rows]
+            tok_colors2= [r["color"] for r in model_rows]
+            fig_tok_pie = go.Figure(data=[go.Pie(
+                labels=tok_labels, values=tok_vals2, hole=0.55,
+                marker=dict(colors=tok_colors2, line=dict(color='#060203', width=2)),
+                textfont=dict(color='#fdf0e8', size=11),
+            )])
+            fig_tok_pie.update_layout(
+                title=dict(text="🪙 Total Tokens Used per Model", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#c8917a"),
+                legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(t=50, b=20, l=20, r=20), height=360,
+                annotations=[dict(
+                    text=f"<b>{sum(tok_vals2):,}</b><br>total",
+                    x=0.5, y=0.5, font_size=14, showarrow=False,
+                    font=dict(color="#f7c948", family="Cinzel")
+                )]
+            )
+            st.plotly_chart(fig_tok_pie, use_container_width=True)
+
+        # ── ROW 4: Response time box plot (per model) ──
+        if any(len(ms_data[r["mkey"]]["response_times"]) > 1 for r in model_rows):
+            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:10px 0 6px;font-family:\'JetBrains Mono\',monospace;">📦 RESPONSE TIME DISTRIBUTION PER MODEL</div>', unsafe_allow_html=True)
+            fig_box = go.Figure()
+            for row in model_rows:
+                rts = ms_data[row["mkey"]]["response_times"]
+                if rts:
+                     color = row["color"]
+                     fill_color = hex_to_rgba(color, 0.15)
+                     fig_box.add_trace(go.Box(
+                         y=rts,
+                         name=row["model"][:20],
+                         marker_color=row["color"],
+                         line_color=row["color"],
+                         fillcolor=fill_color,
+                         boxmean=True,
+                    ))
+            fig_box.update_layout(
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Response Time (s)"),
+                xaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a"),
+                legend=dict(font=dict(color="#c8917a"), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(t=20, b=30, l=40, r=20), height=300,
+            )
+            st.plotly_chart(fig_box, use_container_width=True)
+
+        # ── ROW 5: Call count + cumulative tokens line ──
+        rc7, rc8 = st.columns(2)
+
+        with rc7:
+            call_counts = [r["calls"] for r in model_rows]
+            fig_calls = go.Figure(go.Bar(
+                x=[r["model"][:20] for r in model_rows],
+                y=call_counts,
+                marker=dict(
+                    color=call_counts,
+                    colorscale=[[0,"#2a1015"],[0.4,"#ff6b35"],[1,"#f7c948"]],
+                    line=dict(color='rgba(0,0,0,0)'),
+                ),
+                text=call_counts,
+                textposition='outside',
+                textfont=dict(color='#fdf0e8', size=12),
+            ))
+            fig_calls.update_layout(
+                title=dict(text="💬 Total API Calls per Model", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#c8917a"),
+                xaxis=dict(gridcolor="rgba(0,0,0,0)", color="#c8917a", tickangle=-20),
+                yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="calls"),
+                margin=dict(t=50, b=60, l=40, r=20), height=280,
+            )
+            st.plotly_chart(fig_calls, use_container_width=True)
+
+        with rc8:
+            # Scatter: avg_rt vs avg_cps (bubble = total tokens)
+            if len(model_rows) >= 1:
+                bubble_sizes = [max(10, r["total_tokens"] / 5) for r in model_rows]
+                fig_scatter = go.Figure(go.Scatter(
+                    x=[r["avg_rt"] for r in model_rows],
+                    y=[r["avg_cps"] for r in model_rows],
+                    mode='markers+text',
+                    marker=dict(
+                        size=bubble_sizes,
+                        color=[r["color"] for r in model_rows],
+                        line=dict(color='#060203', width=2),
+                        opacity=0.85,
+                        sizemode='diameter',
+                        sizeref=max(bubble_sizes)/40,
+                    ),
+                    text=[r["model"][:15] for r in model_rows],
+                    textposition='top center',
+                    textfont=dict(color='#c8917a', size=10),
+                    hovertemplate="<b>%{text}</b><br>Avg RT: %{x:.2f}s<br>Speed: %{y:.0f} c/s<extra></extra>",
+                ))
+                fig_scatter.update_layout(
+                    title=dict(text="🔴 Speed vs Latency (bubble = total tokens)", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#c8917a"),
+                    xaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Avg Response Time (s) →"),
+                    yaxis=dict(gridcolor="#2a1015", color="#c8917a", title="Chars / Second ↑"),
+                    margin=dict(t=50, b=50, l=60, r=20), height=280,
+                )
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+        # ── Detailed Table ──
+        st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 8px;font-family:\'JetBrains Mono\',monospace;">📋 DETAILED MODEL STATS TABLE</div>', unsafe_allow_html=True)
+        table_rows = []
+        for row in model_rows:
+            table_rows.append({
+                "Model": row["model"],
+                "Provider": row["provider"].split()[0] if row["provider"] else "—",
+                "Calls": row["calls"],
+                "Avg RT (s)": f"{row['avg_rt']:.2f}",
+                "Min RT (s)": f"{row['min_rt']:.2f}",
+                "Max RT (s)": f"{row['max_rt']:.2f}",
+                "Avg Tokens": f"~{int(row['avg_tokens'])}",
+                "Total Tokens": f"~{int(row['total_tokens'])}",
+                "Avg Speed (c/s)": f"{row['avg_cps']:.0f}",
+                "Avg Chars": f"{int(row['avg_chars'])}",
+                "Positivity": f"{row['pos_rate']:.0%}",
+            })
+        if table_rows:
+            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+        # ── AI Recommendations ──
+        st.divider()
+        st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:0.85rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:10px;">💡 AI-POWERED RECOMMENDATIONS</div>', unsafe_allow_html=True)
+
+        if model_rows:
+            fastest     = min(model_rows, key=lambda x: x["avg_rt"])
+            most_tokens = max(model_rows, key=lambda x: x["avg_tokens"])
+            highest_cps = max(model_rows, key=lambda x: x["avg_cps"])
+            most_positive = max(model_rows, key=lambda x: x["pos_rate"])
+            most_calls  = max(model_rows, key=lambda x: x["calls"])
+
+            recs = [
+                (fastest["color"],       "⚡ Fastest Response",     fastest["model"],        f"{fastest['avg_rt']:.2f}s avg",           "Best for real-time, latency-sensitive applications"),
+                (highest_cps["color"],   "🚀 Highest Throughput",   highest_cps["model"],    f"{highest_cps['avg_cps']:.0f} chars/sec",  "Best for long-form content generation"),
+                (most_tokens["color"],   "📝 Most Verbose",         most_tokens["model"],    f"~{int(most_tokens['avg_tokens'])} tokens", "Best for detailed explanations and research"),
+                (most_positive["color"], "☀️ Most Positive Tone",   most_positive["model"],  f"{most_positive['pos_rate']:.0%} positive", "Best for customer-facing and creative tasks"),
+                (most_calls["color"],    "🏆 Most Used This Session", most_calls["model"],   f"{most_calls['calls']} calls",              "Your go-to model for this session"),
+            ]
+
+            rec_cols = st.columns(min(3, len(recs)))
+            for i, (color, title, model_name, stat, desc) in enumerate(recs):
+                with rec_cols[i % len(rec_cols)]:
+                    st.markdown(f"""
+                    <div style="background:linear-gradient(135deg,#0d0406,#060203);border:1px solid {color}33;
+                        border-left:3px solid {color};border-radius:12px;padding:14px;margin-bottom:10px;">
+                        <div style="font-size:0.65rem;color:{color};font-family:'JetBrains Mono',monospace;letter-spacing:2px;margin-bottom:6px;">{title}</div>
+                        <div style="font-family:'Cinzel',serif;font-size:0.85rem;color:#fdf0e8;font-weight:700;margin-bottom:4px;">{model_name[:28]}</div>
+                        <div style="font-size:0.72rem;color:{color};font-family:'JetBrains Mono',monospace;margin-bottom:6px;">{stat}</div>
+                        <div style="font-size:0.78rem;color:#c8917a;font-family:'Crimson Pro',serif;line-height:1.5;">{desc}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # ── Use-case matrix ──
+            st.markdown('<div style="font-size:0.76rem;color:#c8917a;margin:14px 0 8px;font-family:\'JetBrains Mono\',monospace;">🗺️ USE-CASE BEST-FIT MATRIX</div>', unsafe_allow_html=True)
+            use_cases = ["Real-time Chat", "Long Documents", "Code Generation", "Creative Writing", "Data Analysis", "Customer Support"]
+
+            # Score each model per use-case using weighted formula
+            matrix_data = []
+            for uc in use_cases:
+                row_uc = {"Use Case": uc}
+                for mr in model_rows:
+                    if uc == "Real-time Chat":
+                        score = max(0, 100 - mr["avg_rt"] * 20)
+                    elif uc == "Long Documents":
+                        score = min(100, mr["avg_tokens"] / 5)
+                    elif uc == "Code Generation":
+                        score = (mr["avg_cps"] / max(r["avg_cps"] for r in model_rows)) * 80 + mr["pos_rate"] * 20
+                    elif uc == "Creative Writing":
+                        score = mr["pos_rate"] * 60 + (mr["avg_chars"] / max(r["avg_chars"] for r in model_rows)) * 40
+                    elif uc == "Data Analysis":
+                        score = (mr["avg_tokens"] / max(r["avg_tokens"] for r in model_rows)) * 70 + mr["pos_rate"] * 30
+                    else:  # Customer Support
+                        score = mr["pos_rate"] * 70 + max(0, 100 - mr["avg_rt"] * 10) * 0.3
+                    row_uc[mr["model"][:15]] = f"{min(100,max(0,score)):.0f}%"
+                matrix_data.append(row_uc)
+
+            if matrix_data:
+                st.dataframe(pd.DataFrame(matrix_data), use_container_width=True, hide_index=True)
+
+            # ── Heatmap of scores ──
+            if len(model_rows) >= 2:
+                heat_models = [mr["model"][:18] for mr in model_rows]
+                heat_scores = []
+                for uc in use_cases:
+                    row_scores = []
+                    for mr in model_rows:
+                        if uc == "Real-time Chat":
+                            s = max(0, 100 - mr["avg_rt"] * 20)
+                        elif uc == "Long Documents":
+                            s = min(100, mr["avg_tokens"] / 5)
+                        elif uc == "Code Generation":
+                            s = (mr["avg_cps"] / max(r["avg_cps"] for r in model_rows)) * 80 + mr["pos_rate"] * 20
+                        elif uc == "Creative Writing":
+                            s = mr["pos_rate"] * 60 + (mr["avg_chars"] / max(r["avg_chars"] for r in model_rows)) * 40
+                        elif uc == "Data Analysis":
+                            s = (mr["avg_tokens"] / max(r["avg_tokens"] for r in model_rows)) * 70 + mr["pos_rate"] * 30
+                        else:
+                            s = mr["pos_rate"] * 70 + max(0, 100 - mr["avg_rt"] * 10) * 0.3
+                        row_scores.append(min(100, max(0, s)))
+                    heat_scores.append(row_scores)
+
+                fig_heat = go.Figure(data=go.Heatmap(
+                    z=heat_scores,
+                    x=heat_models,
+                    y=use_cases,
+                    colorscale=[
+                        [0.0, "#1d0406"],
+                        [0.3, "#e63946"],
+                        [0.6, "#ff6b35"],
+                        [0.8, "#f7c948"],
+                        [1.0, "#52b788"],
+                    ],
+                    text=[[f"{v:.0f}%" for v in row] for row in heat_scores],
+                    texttemplate="%{text}",
+                    textfont=dict(color="white", size=11, family="JetBrains Mono"),
+                    hoverongaps=False,
+                ))
+                fig_heat.update_layout(
+                    title=dict(text="🌡️ Performance Heatmap by Use Case", font=dict(color="#ff6b35", size=13, family="Cinzel")),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#c8917a"),
+                    xaxis=dict(color="#c8917a", tickangle=-20),
+                    yaxis=dict(color="#c8917a"),
+                    margin=dict(t=50, b=60, l=140, r=20),
+                    height=350,
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
+
 
 # ══════════════════════════════════════════════════════════════════
-# TAB 10: SETTINGS
+# TAB 11: SETTINGS
 # ══════════════════════════════════════════════════════════════════
 with tab_settings:
     st.markdown('<div style="font-family:\'Cinzel\',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,#ff6b35,#f7c948);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:2px;margin-bottom:1rem;">🛠 SETTINGS & CONFIGURATION</div>', unsafe_allow_html=True)
@@ -2779,7 +3243,9 @@ with tab_settings:
             <strong style="color:#ff6b35;font-family:'Cinzel',serif;font-size:1rem;">🔥 Phoenix AI Studio v5.0</strong><br><br>
             {''.join(f'<span style="color:{pd["color"]};">{pn.split("(")[0].strip()}</span><br>' for pn, pd in PROVIDERS.items())}
             <br>
-            <strong style="color:#fdf0e8;">NEW IN v5.0</strong><br>
+            <strong style="color:#fdf0e8;">NEW IN v5.1</strong><br>
+            🆚 Model Comparisons Tab (NEW)<br>
+            📋 Inline Report Summary (Fixed)<br>
             📈 Deep Stats Dashboard<br>
             🗒️ Session Notes System<br>
             ⚡ Model Benchmarking<br>
