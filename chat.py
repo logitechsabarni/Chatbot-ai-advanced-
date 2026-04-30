@@ -1770,6 +1770,9 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                             "You are an expert research analyst and writer. Always produce structured, detailed, accurate reports with concrete examples and specific insights. Never give vague or generic answers.",
                             0.4, max_report_tokens, active_api_key
                         )
+                        report_response = re.sub(r'<!--.*?-->', '', report_response, flags=re.DOTALL)
+                        report_response = re.sub(r'^.*?</div>', '', report_response, flags=re.DOTALL)
+                        report_response = re.sub(r'</div>\s*$', '', report_response, flags=re.DOTALL)
                         rt_report = round(time.time() - t0, 2)
 
                         rpt_obj = {
