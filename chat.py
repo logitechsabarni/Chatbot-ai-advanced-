@@ -835,7 +835,7 @@ tab_chat, tab_prompts, tab_analytics, tab_nlp, tab_deepstats, tab_notes, tab_ben
 with tab_chat:
     if not st.session_state.messages:
         st.markdown(f"""
-        <div class="msg-animate" style="text-align:center;padding:2.5rem 0 1.5rem;">
+        <div class="msg-animate" style="text-align:center;padding:2rem 0 1.2rem;">
             <div style="font-family:'Cinzel',serif;font-size:2.4rem;font-weight:900;
                 background:linear-gradient(135deg,#ff6b35,#f7c948,#ff8c42);
                 -webkit-background-clip:text;-webkit-text-fill-color:transparent;
@@ -848,21 +848,85 @@ with tab_chat:
         </div>
         """, unsafe_allow_html=True)
 
-        suggestions = [
-            ("🔥","Explain how transformer attention works"),
-            ("🐍","Write a Python async REST API with FastAPI"),
-            ("⚡","Compare LLaMA 3 vs GPT-4o architectures"),
-            ("🌑","Write a cyberpunk noir short story"),
-            ("🔐","Explain SQL injection and prevention"),
-            ("🧮","Implement a min-heap in Python"),
-        ]
-        cols = st.columns(3)
-        for i, (icon, prompt) in enumerate(suggestions):
-            with cols[i % 3]:
-                if st.button(f"{icon}  {prompt}", use_container_width=True, key=f"sugg_{i}"):
+    # ── ALWAYS-VISIBLE QUICK QUESTIONS PANEL ──────────────────────
+    ALL_SUGGESTIONS = [
+        # Row 1 — Tech/Code
+        ("🐍", "Python",      "Write a Python async REST API with FastAPI and SQLite"),
+        ("🔥", "Transformers","Explain how transformer attention mechanisms work"),
+        ("⚡", "Compare AI",  "Compare LLaMA 3, GPT-4o and Claude 3.5 architectures"),
+        ("💻", "React",       "Create a React custom hook for debounced search input"),
+        ("🐳", "Docker",      "Write a Docker Compose setup for a full-stack web app"),
+        ("🦀", "Rust",        "Write a Rust CLI tool with clap argument parsing"),
+        # Row 2 — AI/ML
+        ("🧠", "RAG vs FT",   "What's the difference between RAG and fine-tuning?"),
+        ("📉", "Backprop",    "Explain backpropagation step by step with math"),
+        ("🤖", "RLHF",        "How does RLHF train language models?"),
+        ("🌀", "MoE",         "What is mixture of experts (MoE) architecture?"),
+        ("📐", "Embeddings",  "Explain vector embeddings and cosine similarity"),
+        ("🔮", "Diffusion",   "How do diffusion models generate images?"),
+        # Row 3 — Security
+        ("🔐", "SQL Inject",  "Explain SQL injection and how to prevent it"),
+        ("🔑", "OAuth",       "How does OAuth 2.0 + PKCE work step by step?"),
+        ("🛡️", "OWASP",       "Explain OWASP Top 10 vulnerabilities with examples"),
+        ("🔒", "Zero Trust",  "Explain zero-trust security architecture"),
+        ("💀", "Buffer Overflow","What is a buffer overflow attack and how to exploit it?"),
+        ("🧩", "JWT",         "How do JWT tokens work and what are their risks?"),
+        # Row 4 — Creative
+        ("🌑", "Cyberpunk",   "Write a cyberpunk noir short story set in 2087"),
+        ("🧙", "Fantasy",     "Create a fantasy world with a unique magic system"),
+        ("🕵️", "Detective",   "Write a gripping noir detective scene"),
+        ("🌌", "Sci-Fi",      "Write a hard sci-fi story about first contact"),
+        ("🔥", "Fire Origin",  "Create a mythological origin story for fire"),
+        ("🤖", "AI Poem",     "Compose a haiku sequence about artificial minds"),
+        # Row 5 — Data/System Design
+        ("📦", "CAP Theorem", "Explain the CAP theorem with real-world examples"),
+        ("🗃️", "LRU Cache",   "Best data structures for an LRU cache?"),
+        ("🔀", "Hashing",     "How does consistent hashing work in distributed systems?"),
+        ("📨", "Kafka",       "Explain Apache Kafka architecture and use cases"),
+        ("🌊", "SQL vs NoSQL","Compare SQL vs NoSQL for different use cases"),
+        ("🏗️", "Microservices","Microservices vs monolith — when to use each?"),
+        # Row 6 — Science/General
+        ("⚛️", "Quantum",     "Explain quantum entanglement in simple terms"),
+        ("🕳️", "Black Holes", "How do black holes form and evaporate?"),
+        ("🧬", "CRISPR",      "How does CRISPR gene editing work?"),
+        ("🌍", "Climate",     "What are the main drivers of climate change?"),
+        ("💰", "2008 Crisis", "What caused the 2008 global financial crisis?"),
+        ("🧮", "Euler",       "Explain Euler's identity and its deep significance"),
+    ]
+
+    # Group suggestions by category for the pills
+    SUGG_CATEGORIES = {
+        "💻 Code":    ALL_SUGGESTIONS[0:6],
+        "🧠 AI/ML":   ALL_SUGGESTIONS[6:12],
+        "🔐 Security":ALL_SUGGESTIONS[12:18],
+        "✍️ Creative":ALL_SUGGESTIONS[18:24],
+        "📊 Data":    ALL_SUGGESTIONS[24:30],
+        "🌍 Science": ALL_SUGGESTIONS[30:36],
+    }
+
+    # Category filter
+    st.markdown('<div style="font-size:0.62rem;color:#4a2a22;font-family:\'JetBrains Mono\',monospace;letter-spacing:2px;margin-bottom:6px;">⚡ QUICK QUESTIONS — click any to ask instantly</div>', unsafe_allow_html=True)
+
+    sugg_cat = st.radio("", list(SUGG_CATEGORIES.keys()), horizontal=True,
+                        key="sugg_cat_radio", label_visibility="collapsed")
+
+    active_suggestions = SUGG_CATEGORIES[sugg_cat]
+
+    # Render 2 rows of 3 buttons each
+    for row_start in range(0, 6, 3):
+        row_cols = st.columns(3)
+        for col_idx, (icon, label, prompt) in enumerate(active_suggestions[row_start:row_start+3]):
+            with row_cols[col_idx]:
+                btn_label = f"{icon} **{label}**\n{prompt[:42]}{'…' if len(prompt)>42 else ''}"
+                if st.button(prompt[:55] + ("…" if len(prompt)>55 else ""),
+                             use_container_width=True,
+                             key=f"qs_{sugg_cat}_{row_start}_{col_idx}",
+                             help=prompt):
                     st.session_state._pending_prompt = prompt
                     st.rerun()
-        st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    st.divider()
 
     search_active = search_query and search_query.strip()
     if search_active:
