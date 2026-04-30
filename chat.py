@@ -2870,7 +2870,7 @@ with tab_modelcomp:
                         r=vals + [vals[0]],
                         theta=radar_cats + [radar_cats[0]],
                         fill='toself',
-                        fillcolor=f"{row['color']}18",
+                        fillcolor = "rgba(0, 123, 255, 0.2)"
                         line=dict(color=row['color'], width=2),
                         marker=dict(color=row['color'], size=6),
                         name=row['model'][:20],
