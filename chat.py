@@ -664,6 +664,8 @@ for key, val in {
     "_run_prompt_tab":   False,
     "flashcard_history": [],
     "flashcard_log":     [],
+    "last_report":       None,
+    "model_stats":       {},
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -1098,6 +1100,26 @@ with tab_chat:
 
                 # Update mood log
                 st.session_state.mood_log.append({"time": datetime.now().strftime("%H:%M"), "sentiment": sent, "score": sent_score})
+
+                # ── Track per-model stats ──
+                mkey = f"{pdata['id']}::{model_sel}"
+                if mkey not in st.session_state.model_stats:
+                    st.session_state.model_stats[mkey] = {
+                        "provider": pdata["id"], "model": model_sel,
+                        "provider_label": provider.split("(")[0].strip(),
+                        "color": pdata["color"],
+                        "calls": 0, "total_tokens": 0, "total_rt": 0.0,
+                        "total_chars": 0, "sentiments": [],
+                        "response_times": [], "token_list": [],
+                    }
+                ms = st.session_state.model_stats[mkey]
+                ms["calls"]        += 1
+                ms["total_tokens"] += tokens
+                ms["total_rt"]     += rt
+                ms["total_chars"]  += len(full_response)
+                ms["sentiments"].append(sent)
+                ms["response_times"].append(rt)
+                ms["token_list"].append(tokens)
 
                 ai_ts = datetime.now().strftime("%H:%M")
                 st.session_state.messages.append({"role": "assistant", "content": full_response, "timestamp": ai_ts})
@@ -1746,19 +1768,19 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                         )
                         rt_report = round(time.time() - t0, 2)
 
-                        # Save report to session
-                        if "research_reports" not in st.session_state:
-                            st.session_state.research_reports = []
-                        st.session_state.research_reports.append({
-                            "query": research_query,
-                            "report": report_response,
-                            "depth": report_depth,
-                            "style": report_style,
-                            "model": model_sel,
-                            "rt": rt_report,
+                        rpt_obj = {
+                            "query":     research_query,
+                            "report":    report_response,
+                            "depth":     report_depth,
+                            "style":     report_style,
+                            "model":     model_sel,
+                            "rt":        rt_report,
                             "timestamp": datetime.now().strftime("%H:%M %d/%m"),
-                            "tokens": count_tokens_approx(report_response),
-                        })
+                            "tokens":    count_tokens_approx(report_response),
+                            "words":     len(report_response.split()),
+                        }
+                        st.session_state.research_reports.append(rpt_obj)
+                        st.session_state.last_report = rpt_obj
 
                         # Display report header
                         st.markdown(f"""
@@ -1793,11 +1815,6 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                             mime="text/plain",
                             use_container_width=True,
                         )
-
-                        # Send to chat button
-                        if st.button("💬 Discuss this report in Chat", use_container_width=True, key="report_to_chat"):
-                            st.session_state._pending_prompt = f"I just read a research report about: {research_query}\n\nCan you elaborate on the most important aspect of this topic and give me specific actionable insights?"
-                            st.rerun()
 
                     except Exception as e:
                         st.error(f"⚠ Report generation failed: {str(e)}")
