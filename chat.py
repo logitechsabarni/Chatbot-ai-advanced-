@@ -2920,13 +2920,15 @@ with tab_modelcomp:
             for row in model_rows:
                 rts = ms_data[row["mkey"]]["response_times"]
                 if rts:
-                    fig_box.add_trace(go.Box(
-                        y=rts,
-                        name=row["model"][:20],
-                        marker_color=row["color"],
-                        line_color=row["color"],
-                        fillcolor=f"{row['color']}22",
-                        boxmean=True,
+                     color = row["color"]
+                     fill_color = hex_to_rgba(color, 0.15)
+                     fig_box.add_trace(go.Box(
+                         y=rts,
+                         name=row["model"][:20],
+                         marker_color=row["color"],
+                         line_color=row["color"],
+                         fillcolor=fill_color,
+                         boxmean=True,
                     ))
             fig_box.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
