@@ -1794,8 +1794,8 @@ Be thorough, accurate, well-structured, and use specific examples. Do NOT be vag
                         rpt_read = readability_score(report_response)
 
                         # Extract executive summary (text after "Executive Summary" header)
-                        exec_match = re.search(r'Executive Summary[^\n]*\n+([\s\S]*?)(?=##|$)', report_response, re.IGNORECASE)
-                        exec_summary = exec_match.group(1).strip()[:500] if exec_match else " ".join(rpt_words[:80]) + "…"
+                        exec_match = re.search(r'##\s*.*Executive Summary.*\n+([\s\S]*?)(?=\n##|\Z)', report_response, re.IGNORECASE)
+                        exec_summary = call_ai(provider, model_sel, [{"role": "user", "content": f"Summarize the following report in 2-3 concise lines:\n\n{report_response}"}], "You are a summarization assistant.", 0.2, 150, active_api_key).strip()[:500] if report_response else "No summary available."
 
                         # Extract key takeaways
                         key_match = re.search(r'Key Takeaways[^\n]*\n+([\s\S]*?)(?=##|$)', report_response, re.IGNORECASE)
